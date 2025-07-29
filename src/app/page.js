@@ -2,10 +2,11 @@
 
 import RegistrationForm from "@/components/RegistrationForm";
 import Dashboard from "@/components/Dashboard";
+import AdminDashboard from "@/components/AdminDashboard"; // Import the new component
 import { useWeb3 } from "@/context/Web3Context";
 
 export default function Home() {
-  const { account, isRegistered } = useWeb3();
+  const { account, isRegistered, userProfile } = useWeb3();
 
   const renderContent = () => {
     if (!account) {
@@ -17,8 +18,18 @@ export default function Home() {
       );
     }
 
-    // If account is connected, check if they are registered
-    return isRegistered ? <Dashboard /> : <RegistrationForm />;
+    if (!isRegistered) {
+      return <RegistrationForm />;
+    }
+
+    // Check user role and render the correct dashboard
+    // Role enum: HospitalAdmin is 2
+    if (userProfile && Number(userProfile.role) === 2) {
+        return <AdminDashboard />;
+    }
+
+    // Default to the general user dashboard
+    return <Dashboard />;
   };
 
   return (
