@@ -1,9 +1,10 @@
-import Image from "next/image";
+import RegistrationForm from "@/components/RegistrationForm";
 
 export default function Home() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-between p-24">
-      <h1 className="text-4xl font-bold">Our Medical Records dApp</h1>
-    </main>
+    // We changed the styling here to center the form on the page
+    <div className="flex items-center justify-center min-h-[calc(100vh-150px)]">
+      <RegistrationForm />
+    </div>
   );
 }
