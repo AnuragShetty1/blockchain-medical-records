@@ -1,7 +1,8 @@
 "use client";
 
 import { useWeb3 } from "@/context/Web3Context";
-import UploadForm from "./UploadForm"; // Import the new component
+import UploadForm from "./UploadForm";
+import RecordList from "./RecordList"; // Import the new component
 
 export default function Dashboard() {
     const { userProfile } = useWeb3();
@@ -36,8 +37,13 @@ export default function Dashboard() {
                 </div>
             </div>
 
-            {/* Conditionally render the upload form */}
-            {isPatient && <UploadForm />}
+            {/* Conditionally render patient-specific components */}
+            {isPatient && (
+                <>
+                    <UploadForm />
+                    <RecordList />
+                </>
+            )}
         </div>
     );
 }

@@ -65,4 +65,9 @@ contract MedicalRecords {
         // Emit an event
         emit RecordAdded(msg.sender, _ipfsHash, block.timestamp);
     }
+    // --- NEW GETTER FUNCTION ---
+    function getPatientRecords(address _patientAddress) public view returns (Record[] memory) {
+        // This function returns the entire array of Record structs for a given patient
+        return patientRecords[_patientAddress];
+    }
 }

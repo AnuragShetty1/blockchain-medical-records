@@ -5,42 +5,56 @@ import { useWeb3 } from '@/context/Web3Context';
 import axios from 'axios';
 
 export default function UploadForm() {
-    const { contract } = useWeb3();
+    // Get the functions and data we need from our context
+    const { contract, account, checkUserRegistration } = useWeb3();
     const [file, setFile] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [message, setMessage] = useState('');
 
     const handleFileChange = (e) => {
         setFile(e.target.files[0]);
+        setMessage(''); // Clear previous messages when a new file is selected
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!file || !contract) return;
+        if (!file || !contract || !account) {
+            setMessage("Please select a file and ensure your wallet is connected.");
+            return;
+        };
 
         setIsLoading(true);
-        setMessage('Uploading file to IPFS...');
+        setMessage('1/2: Uploading file to IPFS...');
 
         try {
             const formData = new FormData();
             formData.append("file", file);
 
-            // 1. Upload file to IPFS via our own backend
+            // Step 1: Upload file to IPFS via our own backend
             const res = await axios.post('/api/upload', formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
             const ipfsHash = res.data.ipfsHash;
-            setMessage(`File uploaded to IPFS: ${ipfsHash}. Now adding record to blockchain...`);
+            setMessage(`2/2: File uploaded. Please confirm the transaction to add the record to the blockchain.`);
 
-            // 2. Add record to the blockchain
+            // Step 2: Add record to the blockchain
             const tx = await contract.addRecord(ipfsHash);
             await tx.wait();
 
-            setMessage('Record successfully added to the blockchain!');
-            setFile(null);
+            setMessage('Transaction successful! Refreshing your record list...');
+
+            // Step 3: This is the crucial new step!
+            // Refresh the user's state, which will re-fetch the record list.
+            await checkUserRegistration(account, contract);
+
+            setMessage('Your records are now up to date.');
+            setFile(null); // Clear the file input
+            // Clear the success message after a few seconds
+            setTimeout(() => setMessage(''), 5000); 
+
         } catch (error) {
             console.error("Upload failed:", error);
-            setMessage('Upload failed. Please check the console.');
+            setMessage('Upload failed. The transaction may have been rejected.');
         } finally {
             setIsLoading(false);
         }
