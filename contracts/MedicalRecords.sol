@@ -2,6 +2,12 @@
 pragma solidity ^0.8.24;
 
 contract MedicalRecords {
+    // Custom error to handle cases where a user tries to register more than once
+    error AlreadyRegistered();
+
+    // Event to be emitted when a new user successfully registers
+    event UserRegistered(address indexed userAddress, string name, Role role);
+
     // An enumeration to represent the different roles in the system
     enum Role {
         Patient,
@@ -29,9 +35,24 @@ contract MedicalRecords {
     }
 
     // A mapping to link a wallet address to a User struct
-    // This is our main "database" for users
     mapping(address => User) public users;
 
     // A mapping to link a patient's address to a list (array) of their records
     mapping(address => Record[]) public patientRecords;
+
+    // Function to allow a new user to register
+    function registerUser(string memory _name, Role _role) public {
+        if (users[msg.sender].walletAddress != address(0)) {
+            revert AlreadyRegistered();
+        }
+
+        users[msg.sender] = User({
+            walletAddress: msg.sender,
+            name: _name,
+            role: _role,
+            isVerified: false
+        });
+
+        emit UserRegistered(msg.sender, _name, _role);
+    }
 }
