@@ -1,16 +1,7 @@
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import Header from "@/components/Header"; // Import the Header
-import Footer from "@/components/Footer"; // Import the Footer
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+import Header from "@/components/Header";
+import Footer from "@/components/Footer";
+import { Web3Provider } from "@/context/Web3Context"; // Import the provider
 
 export const metadata = {
   title: "MediLedger",
@@ -21,9 +12,11 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body className="bg-slate-50 text-slate-800">
-        <Header />
-        <main>{children}</main>
-        <Footer />
+        <Web3Provider> {/* Wrap everything with the provider */}
+          <Header />
+          <main>{children}</main>
+          <Footer />
+        </Web3Provider>
       </body>
     </html>
   );
