@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { useWeb3 } from '@/context/Web3Context';
 
 export default function RegistrationForm() {
-    const { contract } = useWeb3();
+    // We now need the 'account' and 'checkUserRegistration' function from our context
+    const { contract, account, checkUserRegistration } = useWeb3(); 
     const [name, setName] = useState('');
     const [role, setRole] = useState(0); // Default to Patient (enum value 0)
     const [isLoading, setIsLoading] = useState(false);
@@ -12,7 +13,7 @@ export default function RegistrationForm() {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!contract) {
+        if (!contract || !account) {
             setMessage('Please connect your wallet first.');
             return;
         }
@@ -22,19 +23,27 @@ export default function RegistrationForm() {
         }
 
         setIsLoading(true);
-        setMessage('Processing your registration...');
+        setMessage('Please confirm the transaction in your wallet...');
 
         try {
             const tx = await contract.registerUser(name, role);
+
+            setMessage('Processing transaction... please wait.');
             await tx.wait(); // Wait for the transaction to be mined
-            setMessage('Registration successful! Your transaction hash is: ' + tx.hash);
+
+            setMessage('Registration successful! Updating your status...');
+
+            // This is the crucial new step!
+            // After the transaction is successful, we re-check the user's status.
+            // This will update the global state and cause the UI to switch to the Dashboard.
+            await checkUserRegistration(account, contract);
+
         } catch (error) {
             console.error("Registration failed:", error);
-            // This is our improved error handling block
             if (error.data === "0x3a81d6fc" || (error.message && error.message.includes("AlreadyRegistered"))) {
                 setMessage("This wallet address is already registered.");
             } else {
-                setMessage("Registration failed. Please check the console for details.");
+                setMessage("Registration failed. The transaction may have been rejected.");
             }
         } finally {
             setIsLoading(false);
@@ -83,7 +92,7 @@ export default function RegistrationForm() {
                         disabled={isLoading}
                         className="w-full px-4 py-2 font-bold text-white bg-teal-500 rounded-md hover:bg-teal-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:bg-gray-400"
                     >
-                        {isLoading ? 'Registering...' : 'Register'}
+                        {isLoading ? 'Processing...' : 'Register'}
                     </button>
                 </div>
             </form>
