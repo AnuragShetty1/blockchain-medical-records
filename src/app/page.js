@@ -2,7 +2,8 @@
 
 import RegistrationForm from "@/components/RegistrationForm";
 import Dashboard from "@/components/Dashboard";
-import AdminDashboard from "@/components/AdminDashboard"; // Import the new component
+import AdminDashboard from "@/components/AdminDashboard";
+import InsuranceDashboard from "@/components/InsuranceDashboard"; // Import
 import { useWeb3 } from "@/context/Web3Context";
 
 export default function Home() {
@@ -22,13 +23,13 @@ export default function Home() {
       return <RegistrationForm />;
     }
 
-    // Check user role and render the correct dashboard
-    // Role enum: HospitalAdmin is 2
+    // Role enum: InsuranceProvider is 3
+    if (userProfile && Number(userProfile.role) === 3) {
+        return <InsuranceDashboard />;
+    }
     if (userProfile && Number(userProfile.role) === 2) {
         return <AdminDashboard />;
     }
-
-    // Default to the general user dashboard
     return <Dashboard />;
   };
 

@@ -2,8 +2,9 @@
 import { useWeb3 } from "@/context/Web3Context";
 import UploadForm from "./UploadForm";
 import RecordList from "./RecordList";
-import AccessControl from "./AccessControl"; // Import
-import DoctorView from "./DoctorView";     // Import
+import AccessControl from "./AccessControl";
+import DoctorView from "./DoctorView";
+import RequestManager from "./RequestManager"; // Import
 
 export default function Dashboard() {
     const { userProfile } = useWeb3();
@@ -37,16 +38,15 @@ export default function Dashboard() {
                 </div>
             </div>
 
-            {/* Patient View */}
             {role === "Patient" && (
                 <>
+                    <RequestManager /> {/* Add this component */}
                     <AccessControl />
                     <UploadForm />
                     <RecordList />
                 </>
             )}
 
-            {/* Doctor View */}
             {role === "Doctor" && userProfile.isVerified && <DoctorView />}
         </div>
     );
