@@ -11,10 +11,24 @@ const Web3Context = createContext();
 export const Web3Provider = ({ children }) => {
     const [account, setAccount] = useState(null);
     const [contract, setContract] = useState(null);
+    const [owner, setOwner] = useState(null);
     const [userProfile, setUserProfile] = useState(null);
     const [isRegistered, setIsRegistered] = useState(false);
     const [records, setRecords] = useState([]);
     const [requests, setRequests] = useState([]);
+    const [accessList, setAccessList] = useState([]); // New state for the access list
+
+    // New function to fetch the access list
+    const fetchAccessList = async (userAddress, contractInstance) => {
+        try {
+            console.log("DEBUG: Fetching access list...");
+            const list = await contractInstance.getAccessList(userAddress);
+            setAccessList(list);
+            console.log("DEBUG: Found access list:", list);
+        } catch (error) {
+            console.error("Could not fetch access list:", error);
+        }
+    };
 
     const fetchPendingRequests = async (userAddress, contractInstance) => {
         try {
@@ -25,8 +39,6 @@ export const Web3Provider = ({ children }) => {
             const pendingReqs = [];
             for (let i = 0; i < count; i++) {
                 const req = await contractInstance.getPatientRequestAtIndex(userAddress, i);
-                // --- THIS IS THE FIX ---
-                // Convert the status from a BigInt to a Number before checking
                 if (Number(req.status) === 0) { // 0 is Pending
                     pendingReqs.push(req);
                 }
@@ -50,12 +62,13 @@ export const Web3Provider = ({ children }) => {
                 setUserProfile(user);
                 setIsRegistered(true);
 
-                if (Number(user.role) === 0) {
+                if (Number(user.role) === 0) { // If Patient
                     console.log("DEBUG: User is a Patient. Attempting to call 'getPatientRecords'...");
                     const patientRecords = await contractInstance.getPatientRecords(signerAddress);
                     console.log("DEBUG: 'getPatientRecords' call successful. Records:", patientRecords);
                     setRecords(patientRecords);
                     await fetchPendingRequests(signerAddress, contractInstance);
+                    await fetchAccessList(signerAddress, contractInstance); // Also fetch access list on login
                 }
             } else {
                 console.log("DEBUG: User IS NOT registered.");
@@ -63,6 +76,7 @@ export const Web3Provider = ({ children }) => {
                 setUserProfile(null);
                 setRecords([]);
                 setRequests([]);
+                setAccessList([]);
             }
         } catch (error) {
             console.error("!!! CRITICAL ERROR in checkUserRegistration !!!", error);
@@ -70,6 +84,7 @@ export const Web3Provider = ({ children }) => {
             setUserProfile(null);
             setRecords([]);
             setRequests([]);
+            setAccessList([]);
         }
     };
 
@@ -86,6 +101,10 @@ export const Web3Provider = ({ children }) => {
                 const signer = await web3Provider.getSigner();
                 const contractInstance = new ethers.Contract(address, abi, signer);
                 setContract(contractInstance);
+
+                const contractOwner = await contractInstance.owner();
+                setOwner(contractOwner);
+                console.log("DEBUG: Contract Owner is:", contractOwner);
 
                 await checkUserRegistration(account, contractInstance);
 
@@ -108,35 +127,40 @@ export const Web3Provider = ({ children }) => {
             };
 
             const handleAccessRequested = (requestId, patientAddress, providerAddress, claimId) => {
-                console.log(`DEBUG: AccessRequested event received for patient: ${patientAddress}`);
                 if (patientAddress.toLowerCase() === account.toLowerCase()) {
-                    console.log("DEBUG: This request is for me! Applying delay before refreshing...");
                     setTimeout(() => {
-                        console.log("DEBUG: Delay complete. Refreshing requests now.");
                         fetchPendingRequests(account, contract);
                     }, 1000);
                 }
             };
 
-            const handleRequestArrayUpdated = (patient, newLength) => {
-                console.log(`%cDEBUG: RequestArrayUpdated event received! Patient: ${patient}, New Array Length: ${Number(newLength)}`, "color: lime; font-weight: bold;");
+            // --- NEW EVENT LISTENER ---
+            const handleRequestApproved = (requestId, patientAddress) => {
+                console.log(`DEBUG: RequestApproved event received for patient: ${patientAddress}`);
+                if (patientAddress.toLowerCase() === account.toLowerCase()) {
+                    console.log("DEBUG: My request approval was processed! Refreshing my access list...");
+                    // After a request is approved, the access list changes, so we must refresh it.
+                    setTimeout(() => {
+                       fetchAccessList(account, contract);
+                    }, 1000);
+                }
             };
 
             contract.on('UserVerified', handleUserVerified);
             contract.on('AccessRequested', handleAccessRequested);
-            contract.on('RequestArrayUpdated', handleRequestArrayUpdated);
+            contract.on('RequestApproved', handleRequestApproved); // Subscribe to new event
 
             return () => {
                 console.log("DEBUG: Cleaning up event listeners.");
                 contract.off('UserVerified', handleUserVerified);
                 contract.off('AccessRequested', handleAccessRequested);
-                contract.off('RequestArrayUpdated', handleRequestArrayUpdated);
+                contract.off('RequestApproved', handleRequestApproved); // Unsubscribe
             };
         }
     }, [contract, account]);
 
     return (
-        <Web3Context.Provider value={{ account, contract, isRegistered, userProfile, records, requests, connectWallet, checkUserRegistration, fetchPendingRequests }}>
+        <Web3Context.Provider value={{ account, contract, owner, isRegistered, userProfile, records, requests, accessList, connectWallet, checkUserRegistration, fetchPendingRequests, fetchAccessList }}>
             {children}
         </Web3Context.Provider>
     );

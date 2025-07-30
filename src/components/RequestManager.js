@@ -1,24 +1,33 @@
 "use client";
-
+import { useState, useEffect } from 'react';
 import { useWeb3 } from '@/context/Web3Context';
+import toast from 'react-hot-toast';
 
 export default function RequestManager() {
-    // Get requests and the fetch function directly from the context
     const { contract, account, requests, fetchPendingRequests } = useWeb3();
+    // New state to hold the duration for each request
+    const [durations, setDurations] = useState({});
+
+    const handleDurationChange = (requestId, value) => {
+        setDurations(prev => ({ ...prev, [requestId]: value }));
+    };
 
     const handleApprove = async (requestId) => {
         if (!contract || !account) return;
+        const duration = durations[requestId] || 30; // Default to 30 days if not set
+
+        const toastId = toast.loading(`Approving request for ${duration} days...`);
         try {
-            const tx = await contract.approveRequest(requestId);
+            const tx = await contract.approveRequest(requestId, duration);
             await tx.wait();
-            // Refresh list after approval by calling the context's fetch function
+            toast.success('Request approved!', { id: toastId });
             fetchPendingRequests(account, contract); 
         } catch (error) {
             console.error("Failed to approve request:", error);
+            toast.error('Failed to approve request.', { id: toastId });
         }
     };
 
-    // The component no longer needs its own useEffect or loading state
     if (requests.length === 0) return null;
 
     return (
@@ -29,9 +38,18 @@ export default function RequestManager() {
                     <div key={Number(req.id)} className="p-4 bg-white rounded-md shadow-sm">
                         <p><strong>Provider:</strong> <span className="font-mono text-sm">{req.provider}</span></p>
                         <p><strong>Claim ID:</strong> {req.claimId}</p>
-                        <button onClick={() => handleApprove(req.id)} className="mt-2 px-3 py-1 bg-green-500 text-white text-sm font-semibold rounded-full hover:bg-green-600">
-                            Approve
-                        </button>
+                        <div className="mt-3 flex items-center gap-4">
+                            <input
+                                type="number"
+                                min="1"
+                                placeholder="Days (e.g., 30)"
+                                onChange={(e) => handleDurationChange(Number(req.id), e.target.value)}
+                                className="w-32 px-3 py-1 border border-gray-300 rounded-md"
+                            />
+                            <button onClick={() => handleApprove(Number(req.id))} className="px-4 py-1 bg-green-500 text-white text-sm font-semibold rounded-full hover:bg-green-600">
+                                Approve
+                            </button>
+                        </div>
                     </div>
                 ))}
             </div>

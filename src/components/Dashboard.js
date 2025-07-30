@@ -2,7 +2,7 @@
 import { useWeb3 } from "@/context/Web3Context";
 import UploadForm from "./UploadForm";
 import RecordList from "./RecordList";
-import AccessControl from "./AccessControl";
+import AccessManager from "./AccessManager";
 import DoctorView from "./DoctorView";
 import RequestManager from "./RequestManager"; // Import
 
@@ -40,8 +40,8 @@ export default function Dashboard() {
 
             {role === "Patient" && (
                 <>
-                    <RequestManager /> {/* Add this component */}
-                    <AccessControl />
+                    <RequestManager />
+                    <AccessManager />
                     <UploadForm />
                     <RecordList />
                 </>

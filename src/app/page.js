@@ -3,11 +3,12 @@
 import RegistrationForm from "@/components/RegistrationForm";
 import Dashboard from "@/components/Dashboard";
 import AdminDashboard from "@/components/AdminDashboard";
-import InsuranceDashboard from "@/components/InsuranceDashboard"; // Import
+import SuperAdminDashboard from "@/components/SuperAdminDashboard";
+import InsuranceDashboard from "@/components/InsuranceDashboard"; // Import the InsuranceDashboard
 import { useWeb3 } from "@/context/Web3Context";
 
 export default function Home() {
-  const { account, isRegistered, userProfile } = useWeb3();
+  const { account, isRegistered, userProfile, owner } = useWeb3();
 
   const renderContent = () => {
     if (!account) {
@@ -19,17 +20,27 @@ export default function Home() {
       );
     }
 
+    if (owner && account.toLowerCase() === owner.toLowerCase()) {
+        return <SuperAdminDashboard />;
+    }
+
     if (!isRegistered) {
       return <RegistrationForm />;
     }
 
-    // Role enum: InsuranceProvider is 3
-    if (userProfile && Number(userProfile.role) === 3) {
-        return <InsuranceDashboard />;
+    // This is the new, corrected logic block
+    if (userProfile) {
+        const role = Number(userProfile.role);
+        // Role enum: HospitalAdmin is 2, InsuranceProvider is 3
+        if (role === 2) {
+            return <AdminDashboard />;
+        }
+        if (role === 3) {
+            return <InsuranceDashboard />;
+        }
     }
-    if (userProfile && Number(userProfile.role) === 2) {
-        return <AdminDashboard />;
-    }
+
+    // Default to the general user dashboard for Patients, Doctors, etc.
     return <Dashboard />;
   };
 
