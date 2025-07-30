@@ -4,11 +4,12 @@ import RegistrationForm from "@/components/RegistrationForm";
 import Dashboard from "@/components/Dashboard";
 import AdminDashboard from "@/components/AdminDashboard";
 import SuperAdminDashboard from "@/components/SuperAdminDashboard";
-import InsuranceDashboard from "@/components/InsuranceDashboard"; // Import the InsuranceDashboard
+import InsuranceDashboard from "@/components/InsuranceDashboard";
+import DashboardSkeleton from "@/components/DashboardSkeleton"; // Import the new component
 import { useWeb3 } from "@/context/Web3Context";
 
 export default function Home() {
-  const { account, isRegistered, userProfile, owner } = useWeb3();
+  const { account, isRegistered, userProfile, owner, isLoadingProfile } = useWeb3();
 
   const renderContent = () => {
     if (!account) {
@@ -20,6 +21,11 @@ export default function Home() {
       );
     }
 
+    // --- NEW: Show the skeleton during the initial data fetch ---
+    if (isLoadingProfile) {
+        return <DashboardSkeleton />;
+    }
+
     if (owner && account.toLowerCase() === owner.toLowerCase()) {
         return <SuperAdminDashboard />;
     }
@@ -28,19 +34,12 @@ export default function Home() {
       return <RegistrationForm />;
     }
 
-    // This is the new, corrected logic block
     if (userProfile) {
         const role = Number(userProfile.role);
-        // Role enum: HospitalAdmin is 2, InsuranceProvider is 3
-        if (role === 2) {
-            return <AdminDashboard />;
-        }
-        if (role === 3) {
-            return <InsuranceDashboard />;
-        }
+        if (role === 2) { return <AdminDashboard />; }
+        if (role === 3) { return <InsuranceDashboard />; }
     }
 
-    // Default to the general user dashboard for Patients, Doctors, etc.
     return <Dashboard />;
   };
 

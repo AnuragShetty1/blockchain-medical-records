@@ -16,9 +16,9 @@ export const Web3Provider = ({ children }) => {
     const [isRegistered, setIsRegistered] = useState(false);
     const [records, setRecords] = useState([]);
     const [requests, setRequests] = useState([]);
-    const [accessList, setAccessList] = useState([]); // New state for the access list
+    const [accessList, setAccessList] = useState([]);
+    const [isLoadingProfile, setIsLoadingProfile] = useState(false); // New state for initial loading
 
-    // New function to fetch the access list
     const fetchAccessList = async (userAddress, contractInstance) => {
         try {
             console.log("DEBUG: Fetching access list...");
@@ -68,7 +68,7 @@ export const Web3Provider = ({ children }) => {
                     console.log("DEBUG: 'getPatientRecords' call successful. Records:", patientRecords);
                     setRecords(patientRecords);
                     await fetchPendingRequests(signerAddress, contractInstance);
-                    await fetchAccessList(signerAddress, contractInstance); // Also fetch access list on login
+                    await fetchAccessList(signerAddress, contractInstance);
                 }
             } else {
                 console.log("DEBUG: User IS NOT registered.");
@@ -85,6 +85,8 @@ export const Web3Provider = ({ children }) => {
             setRecords([]);
             setRequests([]);
             setAccessList([]);
+        } finally {
+            setIsLoadingProfile(false); // Set loading to false after check is complete
         }
     };
 
@@ -93,6 +95,7 @@ export const Web3Provider = ({ children }) => {
         const abi = medicalRecordsArtifact.abi;
         if (window.ethereum) {
             try {
+                setIsLoadingProfile(true); // Set loading to true when connection starts
                 const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
                 const account = accounts[0];
                 setAccount(account);
@@ -104,12 +107,12 @@ export const Web3Provider = ({ children }) => {
 
                 const contractOwner = await contractInstance.owner();
                 setOwner(contractOwner);
-                console.log("DEBUG: Contract Owner is:", contractOwner);
 
                 await checkUserRegistration(account, contractInstance);
 
             } catch (error) {
                 console.error("Error in connectWallet function:", error);
+                setIsLoadingProfile(false); // Also set to false on error
             }
         } else {
             alert('Please install MetaMask!');
@@ -118,8 +121,6 @@ export const Web3Provider = ({ children }) => {
 
     useEffect(() => {
         if (contract && account) {
-            console.log("DEBUG: Setting up event listeners...");
-
             const handleUserVerified = (adminAddress, verifiedUserAddress) => {
                 if (verifiedUserAddress.toLowerCase() === account.toLowerCase()) {
                     checkUserRegistration(account, contract);
@@ -134,12 +135,8 @@ export const Web3Provider = ({ children }) => {
                 }
             };
 
-            // --- NEW EVENT LISTENER ---
             const handleRequestApproved = (requestId, patientAddress) => {
-                console.log(`DEBUG: RequestApproved event received for patient: ${patientAddress}`);
                 if (patientAddress.toLowerCase() === account.toLowerCase()) {
-                    console.log("DEBUG: My request approval was processed! Refreshing my access list...");
-                    // After a request is approved, the access list changes, so we must refresh it.
                     setTimeout(() => {
                        fetchAccessList(account, contract);
                     }, 1000);
@@ -148,19 +145,18 @@ export const Web3Provider = ({ children }) => {
 
             contract.on('UserVerified', handleUserVerified);
             contract.on('AccessRequested', handleAccessRequested);
-            contract.on('RequestApproved', handleRequestApproved); // Subscribe to new event
+            contract.on('RequestApproved', handleRequestApproved);
 
             return () => {
-                console.log("DEBUG: Cleaning up event listeners.");
                 contract.off('UserVerified', handleUserVerified);
                 contract.off('AccessRequested', handleAccessRequested);
-                contract.off('RequestApproved', handleRequestApproved); // Unsubscribe
+                contract.off('RequestApproved', handleRequestApproved);
             };
         }
     }, [contract, account]);
 
     return (
-        <Web3Context.Provider value={{ account, contract, owner, isRegistered, userProfile, records, requests, accessList, connectWallet, checkUserRegistration, fetchPendingRequests, fetchAccessList }}>
+        <Web3Context.Provider value={{ account, contract, owner, isRegistered, userProfile, records, requests, accessList, isLoadingProfile, connectWallet, checkUserRegistration, fetchPendingRequests, fetchAccessList }}>
             {children}
         </Web3Context.Provider>
     );
