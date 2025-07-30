@@ -1,19 +1,19 @@
 "use client";
-
 import { useWeb3 } from "@/context/Web3Context";
 import UploadForm from "./UploadForm";
-import RecordList from "./RecordList"; // Import the new component
+import RecordList from "./RecordList";
+import AccessControl from "./AccessControl"; // Import
+import DoctorView from "./DoctorView";     // Import
 
 export default function Dashboard() {
     const { userProfile } = useWeb3();
+    const roleNames = ["Patient", "Doctor", "HospitalAdmin", "InsuranceProvider", "Pharmacist", "Researcher", "Guardian"];
 
-    const roleNames = ["Patient", "Doctor", "Hospital Admin", "Insurance Provider", "Pharmacist", "Researcher", "Guardian"];
-
-    if (!userProfile) {
+    if (!userProfile) { 
         return <div className="text-center"><p>Loading user profile...</p></div>;
     }
 
-    const isPatient = roleNames[Number(userProfile.role)] === "Patient";
+    const role = roleNames[Number(userProfile.role)];
 
     return (
         <div className="w-full max-w-2xl">
@@ -22,7 +22,7 @@ export default function Dashboard() {
                 <div className="space-y-4 text-lg">
                    <div className="flex justify-between">
                        <span className="font-semibold text-gray-600">Your Role:</span>
-                       <span className="font-bold text-teal-600">{roleNames[Number(userProfile.role)]}</span>
+                       <span className="font-bold text-teal-600">{role}</span>
                    </div>
                    <div className="flex justify-between">
                        <span className="font-semibold text-gray-600">Status:</span>
@@ -37,13 +37,17 @@ export default function Dashboard() {
                 </div>
             </div>
 
-            {/* Conditionally render patient-specific components */}
-            {isPatient && (
+            {/* Patient View */}
+            {role === "Patient" && (
                 <>
+                    <AccessControl />
                     <UploadForm />
                     <RecordList />
                 </>
             )}
+
+            {/* Doctor View */}
+            {role === "Doctor" && userProfile.isVerified && <DoctorView />}
         </div>
     );
 }

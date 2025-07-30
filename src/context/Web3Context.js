@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { ethers } from 'ethers';
-import { contractAddress, contractABI } from '@/config';
+
+import contractAddressData from '@/contracts/contract-address.json';
+import medicalRecordsArtifact from '@/contracts/MedicalRecords.json';
 
 const Web3Context = createContext();
 
@@ -16,19 +18,14 @@ export const Web3Provider = ({ children }) => {
     const checkUserRegistration = async (signerAddress, contractInstance) => {
         console.log("DEBUG: [checkUserRegistration] Called for address:", signerAddress);
         try {
-            console.log("DEBUG: Attempting to call 'users' mapping...");
             const user = await contractInstance.users(signerAddress);
-            console.log("DEBUG: 'users' mapping call successful. User data:", user);
-
             if (user.walletAddress !== ethers.ZeroAddress) {
                 console.log("DEBUG: User IS registered.");
                 setUserProfile(user);
                 setIsRegistered(true);
 
                 if (Number(user.role) === 0) {
-                    console.log("DEBUG: User is a Patient. Attempting to call 'getPatientRecords'...");
                     const patientRecords = await contractInstance.getPatientRecords(signerAddress);
-                    console.log("DEBUG: 'getPatientRecords' call successful. Records:", patientRecords);
                     setRecords(patientRecords);
                 }
             } else {
@@ -39,33 +36,24 @@ export const Web3Provider = ({ children }) => {
             }
         } catch (error) {
             console.error("!!! CRITICAL ERROR in checkUserRegistration !!!", error);
-            setIsRegistered(false);
-            setUserProfile(null);
-            setRecords([]);
         }
     };
 
     const connectWallet = async () => {
-        console.log("DEBUG: [connectWallet] Function called.");
+        const address = contractAddressData.MedicalRecords;
+        const abi = medicalRecordsArtifact.abi;
+        console.log(`--- ATTEMPTING TO CONNECT TO CONTRACT AT ADDRESS: ${address} ---`);
+
         if (window.ethereum) {
             try {
-                console.log("DEBUG: Requesting accounts from MetaMask...");
                 const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-                console.log("DEBUG: Accounts received:", accounts);
                 const account = accounts[0];
                 setAccount(account);
 
-                console.log("DEBUG: Creating BrowserProvider...");
                 const web3Provider = new ethers.BrowserProvider(window.ethereum);
-
-                console.log("DEBUG: Getting signer...");
                 const signer = await web3Provider.getSigner();
-                console.log("DEBUG: Signer received:", signer);
-
-                console.log("DEBUG: Creating contract instance...");
-                const contractInstance = new ethers.Contract(contractAddress, contractABI, signer);
+                const contractInstance = new ethers.Contract(address, abi, signer);
                 setContract(contractInstance);
-                console.log("DEBUG: Contract instance created.");
 
                 await checkUserRegistration(account, contractInstance);
 
@@ -73,10 +61,38 @@ export const Web3Provider = ({ children }) => {
                 console.error("Error in connectWallet function:", error);
             }
         } else {
-            console.error("MetaMask is not installed!");
             alert('Please install MetaMask!');
         }
     };
+
+    // --- NEW: REAL-TIME EVENT LISTENER ---
+    useEffect(() => {
+        // Only set up the listener if we have a contract and an account
+        if (contract && account) {
+            console.log("DEBUG: Setting up event listener for UserVerified...");
+
+            const handleUserVerified = (adminAddress, verifiedUserAddress) => {
+                console.log(`DEBUG: UserVerified event received! Admin: ${adminAddress}, Verified User: ${verifiedUserAddress}`);
+
+                // Check if the event is about the currently logged-in user
+                if (verifiedUserAddress.toLowerCase() === account.toLowerCase()) {
+                    console.log("DEBUG: This event is for me! Refreshing my profile...");
+                    // Re-run the checkUserRegistration function to get the updated profile
+                    checkUserRegistration(account, contract);
+                }
+            };
+
+            // Subscribe to the event
+            contract.on('UserVerified', handleUserVerified);
+
+            // This is a cleanup function that runs when the component unmounts
+            // It's crucial for preventing memory leaks
+            return () => {
+                console.log("DEBUG: Cleaning up event listener.");
+                contract.off('UserVerified', handleUserVerified);
+            };
+        }
+    }, [contract, account]); // This effect re-runs whenever the contract or account changes
 
     return (
         <Web3Context.Provider value={{ account, contract, isRegistered, userProfile, records, connectWallet, checkUserRegistration }}>

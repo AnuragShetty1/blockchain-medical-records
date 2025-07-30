@@ -1,33 +1,43 @@
-// We require the Hardhat Runtime Environment explicitly here. This is optional
-// but useful for running the script in a standalone fashion through `node <script>`.
-//
-// You can also run a script with `npx hardhat run <script>`. If you do that, Hardhat
-// will compile your contracts, add the Hardhat Runtime Environment's members to the
-// global scope, and execute the script.
 const hre = require("hardhat");
+const fs = require("fs"); // Import the Node.js File System module
 
 async function main() {
-  // Get the ContractFactory for our "MedicalRecords" contract.
-  // A ContractFactory in ethers.js is an abstraction used to deploy new smart contracts.
+  // 1. Deploy the contract as usual
   const MedicalRecords = await hre.ethers.getContractFactory("MedicalRecords");
-
-  // Deploy the contract. This sends a transaction to the network to create the contract.
-  // The 'await' keyword waits for the deployment transaction to be sent.
   const medicalRecords = await MedicalRecords.deploy();
-
-  // Wait until the contract is fully deployed and mined on the blockchain.
-  // This is important because deployment is not instantaneous.
   await medicalRecords.waitForDeployment();
 
-  // Once deployed, the contract will have a unique address on the blockchain.
-  // We log this address to the console so we know where our contract is.
-  console.log(
-    `MedicalRecords contract deployed to: ${await medicalRecords.getAddress()}`
-  );
+  const contractAddress = await medicalRecords.getAddress();
+  console.log(`MedicalRecords contract deployed to: ${contractAddress}`);
+
+  // 2. NEW: Save the contract's address and ABI to a new file
+  saveFrontendFiles(contractAddress);
 }
 
-// We recommend this pattern to be able to use async/await everywhere
-// and properly handle errors.
+function saveFrontendFiles(contractAddress) {
+  const contractsDir = __dirname + "/../src/contracts";
+
+  // Create the directory if it doesn't exist
+  if (!fs.existsSync(contractsDir)) {
+    fs.mkdirSync(contractsDir);
+  }
+
+  // Write the contract address to a JSON file
+  fs.writeFileSync(
+    contractsDir + "/contract-address.json",
+    JSON.stringify({ MedicalRecords: contractAddress }, undefined, 2)
+  );
+
+  // Get the contract artifact and write the ABI to another JSON file
+  const MedicalRecordsArtifact = hre.artifacts.readArtifactSync("MedicalRecords");
+  fs.writeFileSync(
+    contractsDir + "/MedicalRecords.json",
+    JSON.stringify(MedicalRecordsArtifact, null, 2)
+  );
+
+  console.log("Frontend configuration files saved to /src/contracts");
+}
+
 main().catch((error) => {
   console.error(error);
   process.exitCode = 1;

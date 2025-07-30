@@ -4,15 +4,20 @@ pragma solidity ^0.8.24;
 contract MedicalRecords {
     // --- ERRORS ---
     error AlreadyRegistered();
-    error NotRegistered(); // New Error
-    error NotAPatient();   // New Error
-    error NotAnAdmin(); // New Error: For access control
-    error UserNotFound(); // New Error: If admin tries to verify a non-existent user
+    error NotRegistered();
+    error NotAPatient();
+    error NotAnAdmin();
+    error UserNotFound();
+    error NotAVerifiedDoctor();
+    error AccessAlreadyGranted();
+    error NoAccessToRevoke();
 
     // --- EVENTS ---
     event UserRegistered(address indexed userAddress, string name, Role role);
-    event RecordAdded(address indexed patient, string ipfsHash, uint256 timestamp); // New Event
+    event RecordAdded(address indexed patient, string ipfsHash, uint256 timestamp);
     event UserVerified(address indexed admin, address indexed userAddress);
+    event AccessGranted(address indexed patient, address indexed doctor);
+    event AccessRevoked(address indexed patient, address indexed doctor);
 
     // --- DATA STRUCTURES ---
     enum Role { Patient, Doctor, HospitalAdmin, InsuranceProvider, Pharmacist, Researcher, Guardian }
@@ -30,70 +35,57 @@ contract MedicalRecords {
         address uploadedBy;
     }
 
+    // --- STATE VARIABLES ---
     mapping(address => User) public users;
     mapping(address => Record[]) public patientRecords;
+    mapping(address => mapping(address => bool)) public accessPermissions;
 
     // --- FUNCTIONS ---
     function registerUser(string memory _name, Role _role) public {
-        if (users[msg.sender].walletAddress != address(0)) {
-            revert AlreadyRegistered();
-        }
-        users[msg.sender] = User({
-            walletAddress: msg.sender,
-            name: _name,
-            role: _role,
-            isVerified: false
-        });
+        if (users[msg.sender].walletAddress != address(0)) { revert AlreadyRegistered(); }
+        users[msg.sender] = User({ walletAddress: msg.sender, name: _name, role: _role, isVerified: false });
         emit UserRegistered(msg.sender, _name, _role);
     }
 
-    // --- NEW FUNCTION ---
     function addRecord(string memory _ipfsHash) public {
-        // Check if the caller is registered
-        if (users[msg.sender].walletAddress == address(0)) {
-            revert NotRegistered();
-        }
-        // Check if the caller's role is Patient
-        if (users[msg.sender].role != Role.Patient) {
-            revert NotAPatient();
-        }
-
-        // Push the new record to the patient's record array
-        patientRecords[msg.sender].push(Record({
-            ipfsHash: _ipfsHash,
-            timestamp: block.timestamp, // 'block.timestamp' is the current block's timestamp
-            uploadedBy: msg.sender
-        }));
-
-        // Emit an event
+        if (users[msg.sender].walletAddress == address(0)) { revert NotRegistered(); }
+        if (users[msg.sender].role != Role.Patient) { revert NotAPatient(); }
+        patientRecords[msg.sender].push(Record({ ipfsHash: _ipfsHash, timestamp: block.timestamp, uploadedBy: msg.sender }));
         emit RecordAdded(msg.sender, _ipfsHash, block.timestamp);
     }
 
-    // --- NEW VERIFICATION FUNCTION ---
     function verifyUser(address _userToVerify) public {
-        // Check 1: Is the person calling this function registered?
-        if (users[msg.sender].walletAddress == address(0)) {
-            revert NotRegistered();
-        }
-        // Check 2: Does the person calling this function have the HospitalAdmin role?
-        if (users[msg.sender].role != Role.HospitalAdmin) {
-            revert NotAnAdmin();
-        }
-        // Check 3: Does the user we are trying to verify actually exist?
-        if (users[_userToVerify].walletAddress == address(0)) {
-            revert UserNotFound();
-        }
-
-        // Perform the action: Set the user's isVerified flag to true
+        if (users[msg.sender].walletAddress == address(0)) { revert NotRegistered(); }
+        if (users[msg.sender].role != Role.HospitalAdmin) { revert NotAnAdmin(); }
+        if (users[_userToVerify].walletAddress == address(0)) { revert UserNotFound(); }
         users[_userToVerify].isVerified = true;
-
-        // Emit an event to signal the verification
         emit UserVerified(msg.sender, _userToVerify);
     }
 
-    // --- NEW GETTER FUNCTION ---
+    function grantAccess(address _doctorAddress) public {
+        if (users[msg.sender].role != Role.Patient) { revert NotAPatient(); }
+        User storage doctor = users[_doctorAddress];
+        if (doctor.role != Role.Doctor || !doctor.isVerified) { revert NotAVerifiedDoctor(); }
+        if (accessPermissions[msg.sender][_doctorAddress]) { revert AccessAlreadyGranted(); }
+        accessPermissions[msg.sender][_doctorAddress] = true;
+        emit AccessGranted(msg.sender, _doctorAddress);
+    }
+
+    function revokeAccess(address _doctorAddress) public {
+        if (users[msg.sender].role != Role.Patient) { revert NotAPatient(); }
+        if (!accessPermissions[msg.sender][_doctorAddress]) { revert NoAccessToRevoke(); }
+        accessPermissions[msg.sender][_doctorAddress] = false;
+        emit AccessRevoked(msg.sender, _doctorAddress);
+    }
+
     function getPatientRecords(address _patientAddress) public view returns (Record[] memory) {
-        // This function returns the entire array of Record structs for a given patient
-        return patientRecords[_patientAddress];
+        if (msg.sender == _patientAddress) { return patientRecords[_patientAddress]; }
+        if (accessPermissions[_patientAddress][msg.sender]) { return patientRecords[_patientAddress]; }
+        revert("You do not have permission to view these records.");
+    }
+
+    // --- NEW DEBUGGING GETTER FUNCTION ---
+    function checkAccess(address _patientAddress, address _doctorAddress) public view returns (bool) {
+        return accessPermissions[_patientAddress][_doctorAddress];
     }
 }
