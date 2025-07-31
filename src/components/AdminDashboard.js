@@ -19,19 +19,17 @@ export default function AdminDashboard() {
             return;
         }
         setIsLoading(true);
-        setSearchedUser(null); // Clear previous search results
-        const toastId = toast.loading("Searching for user...");
+        setSearchedUser(null);
         try {
             const user = await contract.users(searchAddress);
             if (user.walletAddress === ethers.ZeroAddress) {
-                toast.error("No user found with this address.", { id: toastId });
+                toast.error("No user found with this address.");
             } else {
                 setSearchedUser(user);
-                toast.success("User found!", { id: toastId });
             }
         } catch (error) {
             console.error("Search failed:", error);
-            toast.error("Failed to fetch user data.", { id: toastId });
+            toast.error("Failed to fetch user data.");
         } finally {
             setIsLoading(false);
         }
@@ -45,7 +43,7 @@ export default function AdminDashboard() {
             const tx = await contract.verifyUser(searchedUser.walletAddress);
             await tx.wait();
             toast.success(`${searchedUser.name} has been verified!`, { id: toastId });
-            // Create a synthetic event object to pass to handleSearch for refreshing data
+            // Refresh search to show updated status
             handleSearch({ preventDefault: () => {} });
         } catch (error) {
             console.error("Verification failed:", error);
@@ -62,7 +60,7 @@ export default function AdminDashboard() {
                 <p className="mt-2 text-gray-500">Search for users to view their status and verify doctors.</p>
             </div>
 
-            <div className="bg-slate-100 p-6 rounded-xl">
+            <div className="bg-slate-50 p-6 rounded-xl">
                 <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-4">
                     <input
                         type="text"
@@ -79,7 +77,7 @@ export default function AdminDashboard() {
             </div>
 
             {searchedUser && (
-                <div className="mt-8 p-6 border rounded-xl">
+                <div className="mt-8 p-6 border rounded-xl animate-fade-in">
                     <h3 className="text-xl font-bold mb-4">User Details</h3>
                     <div className="space-y-3">
                         <p><strong>Name:</strong> {searchedUser.name}</p>
@@ -91,7 +89,6 @@ export default function AdminDashboard() {
                         </p>
                         <p className="font-mono text-sm"><strong>Address:</strong> {searchedUser.walletAddress}</p>
 
-                        {/* Conditional "Verify" button */}
                         {Number(searchedUser.role) === 1 && !searchedUser.isVerified && (
                             <button onClick={handleVerify} disabled={isLoading} className="mt-4 w-full px-4 py-2 font-bold text-white bg-green-600 rounded-md hover:bg-green-700 disabled:bg-gray-400">
                                 {isLoading ? 'Verifying...' : 'Verify this Doctor'}
