@@ -44,3 +44,4 @@ contract MedicalRecords is AccessControl {
         revert("You do not have permission to view these records.");
     }
 }
+
