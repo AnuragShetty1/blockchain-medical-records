@@ -14,9 +14,9 @@ export default function Header() {
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  const profileImageUrl = userProfile?.profileMetadataURI 
-      ? `https://gateway.pinata.cloud/ipfs/${userProfile.profileMetadataURI}`
-      : '/default-avatar.svg';
+  const profileImageUrl = userProfile?.profileMetadataURI
+    ? `https://gateway.pinata.cloud/ipfs/${userProfile.profileMetadataURI}`
+    : '/default-avatar.svg';
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -30,17 +30,24 @@ export default function Header() {
     };
   }, [notificationRef]);
 
-  // [FIX] Determine if the user is a patient. Role enum for Patient is 0.
   const isPatient = userProfile && Number(userProfile.role) === 0;
 
   return (
     <header className="bg-white shadow-md sticky top-0 z-50">
       <nav className="container mx-auto px-6 py-3 flex justify-between items-center">
-        <div className="text-xl font-bold text-teal-600">
-          MediLedger
+        {/* [MODIFIED] Replaced text with the logo image and name */}
+        <div className="flex items-center space-x-2">
+          <Image
+            src="/logo.png" // Make sure you have logo.png in your public folder
+            alt="PRISM Logo"
+            width={70}
+            height={70}
+            priority 
+          />
+          <span className="text-3xl font-bold text-teal-500">PRISM</span>
         </div>
+
         <div className="flex items-center space-x-4">
-          {/* [FIX] Only show the profile info if the user is a patient */}
           {isPatient && (
             <div className="flex items-center gap-3">
               <span className="text-slate-600 font-semibold hidden sm:block">
@@ -52,15 +59,14 @@ export default function Header() {
                 width={40}
                 height={40}
                 className="rounded-full object-cover w-10 h-10 border-2 border-slate-200"
-                onError={(e) => { e.target.onerror = null; e.target.src='/default-avatar.svg'; }}
+                onError={(e) => { e.target.onerror = null; e.target.src = '/default-avatar.svg'; }}
               />
             </div>
           )}
 
-          {/* Notification bell is available for all logged-in users */}
           {userProfile && (
             <div className="relative" ref={notificationRef}>
-              <button 
+              <button
                 onClick={() => setShowNotifications(prev => !prev)}
                 className="p-2 rounded-full hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition-colors"
                 aria-label="Toggle Notifications"
@@ -68,17 +74,17 @@ export default function Header() {
                 <BellIcon />
                 {unreadCount > 0 && (
                   <span className="absolute -top-1 -right-1 flex h-5 w-5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-5 w-5 bg-red-500 text-white text-xs items-center justify-center">
-                          {unreadCount}
-                      </span>
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-5 w-5 bg-red-500 text-white text-xs items-center justify-center">
+                      {unreadCount}
+                    </span>
                   </span>
                 )}
               </button>
               {showNotifications && <Notifications close={() => setShowNotifications(false)} />}
-            </div>
+              _        </div>
           )}
-          
+
           <button
             onClick={connectWallet}
             className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded-full transition-colors"

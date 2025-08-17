@@ -5,7 +5,7 @@ import { Web3Provider } from "@/context/Web3Context";
 import { Toaster } from "react-hot-toast"; // Import the Toaster component
 
 export const metadata = {
-  title: "MediLedger",
+  title: "PRISM - Patient Record Integirity and Security Management",
   description: "A decentralized medical records management system.",
 };
 
