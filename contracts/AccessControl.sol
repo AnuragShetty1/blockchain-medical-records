@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import "./Roles.sol";
 
-abstract contract AccessControl is Roles {
+contract AccessControl is Initializable, Roles {
     // --- ERRORS ---
     error NotAPatient();
     error NotAVerifiedDoctor();
@@ -35,9 +35,13 @@ abstract contract AccessControl is Roles {
     mapping(address => AccessRequest[]) public patientRequests;
     uint256 private _nextRequestId;
 
-    // --- NEW STATE VARIABLES FOR EFFICIENT LOOKUP ---
     mapping(address => address[]) private _grantedAccessList;
     mapping(address => mapping(address => uint256)) private _grantedAccessIndex;
+
+    // Internal initializer to set up the parent contract chain.
+    function __AccessControl_init(address initialOwner) internal onlyInitializing {
+        __Roles_init(initialOwner);
+    }
 
     // --- FUNCTIONS ---
     function grantAccess(address _doctorAddress) public {
@@ -59,7 +63,6 @@ abstract contract AccessControl is Roles {
 
         accessPermissions[msg.sender][_userAddress] = 0;
 
-        // Efficiently remove from the array
         uint256 indexToRemove = _grantedAccessIndex[msg.sender][_userAddress] - 1;
         address lastAddress = _grantedAccessList[msg.sender][_grantedAccessList[msg.sender].length - 1];
         _grantedAccessList[msg.sender][indexToRemove] = lastAddress;
@@ -120,9 +123,9 @@ abstract contract AccessControl is Roles {
         return patientRequests[_patientAddress][_index];
     }
 
-    // --- NEW GETTER FOR ACCESS LIST ---
     function getAccessList(address _patientAddress) public view returns (address[] memory) {
         if (msg.sender != _patientAddress) { revert NotAuthorized(); }
         return _grantedAccessList[_patientAddress];
     }
 }
+

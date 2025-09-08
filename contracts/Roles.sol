@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
-abstract contract Roles is Ownable {
+contract Roles is Initializable, OwnableUpgradeable {
     // --- ERRORS ---
     error AlreadyRegistered();
     error NotRegistered();
@@ -13,7 +14,6 @@ abstract contract Roles is Ownable {
     // --- EVENTS ---
     event UserRegistered(address indexed userAddress, string name, Role role);
     event UserVerified(address indexed admin, address indexed userAddress);
-    // [NEW] Event to signal that a user's profile has been updated.
     event ProfileUpdated(address indexed user, string name, string contactInfo, string profileMetadataURI);
 
     // --- DATA STRUCTURES ---
@@ -26,17 +26,20 @@ abstract contract Roles is Ownable {
         bool isVerified;
     }
 
-    // [NEW] Struct to hold detailed user profile information.
     struct UserProfile {
         string name;
         string contactInfo;
-        string profileMetadataURI; // For future use, e.g., IPFS link to more details
+        string profileMetadataURI;
     }
 
     // --- STATE VARIABLES ---
     mapping(address => User) public users;
-    // [NEW] Mapping to link wallet addresses to their detailed profiles.
     mapping(address => UserProfile) public userProfiles;
+
+    // Internal initializer to set up the parent contract.
+    function __Roles_init(address initialOwner) internal onlyInitializing {
+        __Ownable_init(initialOwner);
+    }
 
     // --- FUNCTIONS ---
     function registerUser(string memory _name, Role _role) public {
@@ -50,7 +53,6 @@ abstract contract Roles is Ownable {
             isVerified: false
         });
 
-        // [MODIFIED] Also create a default profile upon registration.
         userProfiles[msg.sender] = UserProfile({
             name: _name,
             contactInfo: "",
@@ -60,7 +62,6 @@ abstract contract Roles is Ownable {
         emit UserRegistered(msg.sender, _name, _role);
     }
 
-    // [NEW] Allows a registered user to create or update their profile details.
     function updateUserProfile(string calldata _name, string calldata _contactInfo, string calldata _profileMetadataURI) public {
         if (users[msg.sender].walletAddress == address(0)) { revert NotRegistered(); }
 
@@ -69,13 +70,10 @@ abstract contract Roles is Ownable {
             contactInfo: _contactInfo,
             profileMetadataURI: _profileMetadataURI
         });
-
-        // Also update the primary name in the User struct for consistency across the system.
         users[msg.sender].name = _name;
 
         emit ProfileUpdated(msg.sender, _name, _contactInfo, _profileMetadataURI);
     }
-
 
     function addHospitalAdmin(address _newAdmin, string memory _name) public onlyOwner {
         if (users[_newAdmin].walletAddress != address(0)) { revert AlreadyRegistered(); }
@@ -87,7 +85,6 @@ abstract contract Roles is Ownable {
             isVerified: true
         });
 
-        // [MODIFIED] Also create a default profile for the new admin.
         userProfiles[_newAdmin] = UserProfile({
             name: _name,
             contactInfo: "",
@@ -106,3 +103,4 @@ abstract contract Roles is Ownable {
         emit UserVerified(msg.sender, _userToVerify);
     }
 }
+

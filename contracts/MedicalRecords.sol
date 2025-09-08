@@ -1,10 +1,29 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "./AccessControl.sol";
 
-contract MedicalRecords is AccessControl {
-    constructor() Ownable(msg.sender) {}
+contract MedicalRecords is Initializable, AccessControl, UUPSUpgradeable {
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(address initialOwner) public initializer {
+        // This function now correctly initializes the entire contract chain.
+        __AccessControl_init(initialOwner);
+        __UUPSUpgradeable_init();
+    }
+    
+    // This function is required by UUPS to authorize an upgrade.
+    // It restricts upgrade functionality to the contract owner.
+    function _authorizeUpgrade(address newImplementation)
+        internal
+        onlyOwner
+        override
+    {}
 
     // --- EVENTS ---
     event RecordAdded(address indexed patient, string ipfsHash, uint256 timestamp);
@@ -32,12 +51,10 @@ contract MedicalRecords is AccessControl {
         emit RecordAdded(msg.sender, _ipfsHash, block.timestamp);
     }
 
-    // MODIFIED: This now uses the new time-based permission check from AccessControl.sol
     function getPatientRecords(address _patientAddress) public view returns (Record[] memory) {
         if (msg.sender == _patientAddress) {
             return patientRecords[_patientAddress];
         }
-        // Check if the stored timestamp is in the future.
         if (accessPermissions[_patientAddress][msg.sender] > block.timestamp) {
             return patientRecords[_patientAddress];
         }
