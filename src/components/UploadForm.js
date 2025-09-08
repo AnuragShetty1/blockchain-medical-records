@@ -3,24 +3,21 @@
 import { useState, useCallback } from 'react';
 import { useWeb3 } from '@/context/Web3Context';
 import toast from 'react-hot-toast';
+import { Fhir } from 'fhir'; // Import the FHIR library
 
 // --- SVG Icons ---
-const UploadCloudIcon = () => <svg className="w-12 h-12 mx-auto text-slate-400" xmlns="http://www.w.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" /></svg>;
+const UploadCloudIcon = () => <svg className="w-12 h-12 mx-auto text-slate-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" /></svg>;
 const FileIcon = () => <svg className="w-6 h-6 text-slate-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>;
 const CloseIcon = () => <svg className="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>;
 
 
-/**
- * A modern, user-friendly form for uploading medical records.
- * Features a drag-and-drop zone and file preview, consistent with the patient dashboard's design.
- */
 export default function UploadForm() {
     const { contract, checkUserRegistration, account } = useWeb3();
     const [file, setFile] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
     const [isDragActive, setIsDragActive] = useState(false);
+    const [description, setDescription] = useState(''); // State for the new description field
 
-    // Handle file drop event
     const handleDrop = useCallback((e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -30,14 +27,12 @@ export default function UploadForm() {
         }
     }, []);
 
-    // Handle file selection via browse
     const handleChange = (e) => {
         if (e.target.files && e.target.files[0]) {
             setFile(e.target.files[0]);
         }
     };
 
-    // Prevent default browser behavior for drag events
     const handleDrag = useCallback((e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -56,17 +51,50 @@ export default function UploadForm() {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!file) {
-            toast.error("Please select a file to upload.");
+        if (!file || !description) {
+            toast.error("Please provide both a file and a description.");
+            return;
+        }
+        if (!contract) {
+            toast.error("Wallet not fully connected. Please wait and try again.");
             return;
         }
         setIsUploading(true);
-        const toastId = toast.loading("Uploading file to IPFS...");
+        const toastId = toast.loading("Structuring data into FHIR format...");
 
         try {
-            // Step 1: Upload file to IPFS via our Next.js API route
+            // Step 1: Create the FHIR DocumentReference object
+            const fhirResource = {
+                resourceType: "DocumentReference",
+                status: "current",
+                description: description,
+                content: [{
+                    attachment: {
+                        contentType: file.type || 'application/octet-stream',
+                        title: file.name,
+                        creation: new Date().toISOString()
+                    }
+                }]
+            };
+
+            // Step 2: Validate the FHIR object
+            const fhir = new Fhir();
+            const validationResult = fhir.validate(fhirResource);
+            if (!validationResult.valid) {
+                console.error("FHIR Validation Errors:", validationResult.messages);
+                throw new Error("Failed to create a valid FHIR data structure.");
+            }
+
+            // Step 3: Convert the valid JSON object to a Blob to be uploaded
+            const fhirBlob = new Blob([JSON.stringify(fhirResource, null, 2)], { type: 'application/fhir+json' });
+
+            toast.loading("Uploading structured data to IPFS...", { id: toastId });
+            
+            // Step 4: Upload the FHIR Blob via our API route
             const formData = new FormData();
-            formData.append("file", file);
+            // Use a consistent filename for the uploaded blob
+            formData.append("file", fhirBlob, `fhir-document-${Date.now()}.json`);
+            
             const response = await fetch('/api/upload', {
                 method: 'POST',
                 body: formData,
@@ -80,7 +108,7 @@ export default function UploadForm() {
             const ipfsHash = data.ipfsHash;
             toast.loading("File uploaded. Adding record to blockchain...", { id: toastId });
 
-            // Step 2: Add the record to the blockchain (with only one argument)
+            // Step 5: Add the record to the blockchain
             const tx = await contract.addRecord(ipfsHash);
             await tx.wait();
 
@@ -88,6 +116,7 @@ export default function UploadForm() {
 
             // Reset form and refresh user data
             setFile(null);
+            setDescription('');
             if (account && contract) {
                 await checkUserRegistration(account, contract);
             }
@@ -106,6 +135,22 @@ export default function UploadForm() {
             <p className="text-slate-500 mb-6">Add a new medical document to your secure, on-chain history.</p>
             
             <form onSubmit={handleSubmit} className="space-y-6">
+                 {/* New Description Input */}
+                <div>
+                    <label htmlFor="description" className="block text-sm font-medium text-slate-700 mb-2">
+                        Record Description
+                    </label>
+                    <input
+                        type="text"
+                        id="description"
+                        value={description}
+                        onChange={(e) => setDescription(e.target.value)}
+                        placeholder="e.g., Annual Blood Test Results - Sept 2025"
+                        className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        required
+                    />
+                </div>
+
                 {/* File Input / Drop Zone */}
                 <div>
                     {!file ? (
@@ -127,7 +172,6 @@ export default function UploadForm() {
                             <input type="file" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleChange} />
                         </div>
                     ) : (
-                        // File Preview
                         <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-lg">
                             <div className="flex items-center gap-3">
                                 <FileIcon />
@@ -147,12 +191,13 @@ export default function UploadForm() {
                 {/* Submit Button */}
                 <button
                     type="submit"
-                    disabled={isUploading || !file}
+                    disabled={isUploading || !file || !description || !contract}
                     className="w-full px-4 py-3 font-bold text-white bg-teal-600 rounded-lg hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:bg-slate-400 transition-colors shadow-lg"
                 >
-                    {isUploading ? 'Uploading...' : 'Upload and Add Record'}
+                    {isUploading ? 'Processing...' : 'Upload and Add Record'}
                 </button>
             </form>
         </div>
     );
 }
+
