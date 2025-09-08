@@ -1,116 +1,168 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useWeb3 } from '@/context/Web3Context';
+import { format } from 'date-fns';
+import toast from 'react-hot-toast';
+import { getEncryptionKey, decryptFile, base64ToUint8Array } from '@/utils/crypto';
 
 // --- SVG Icons ---
-const HistoryIcon = () => <svg className="w-8 h-8 text-slate-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18-3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>;
-const FileIcon = () => <svg className="w-6 h-6 text-teal-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>;
-const ExternalLinkIcon = () => <svg className="w-4 h-4 ml-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>;
+const DownloadIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>;
+const SpinnerIcon = () => <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>;
+const Spinner = () => <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-slate-500"></div>;
 
 
-/**
- * A component to display a paginated list of medical records in a professional, card-based layout.
- */
-export default function RecordList({ records: recordsFromProps }) {
-    const { records: recordsFromContext } = useWeb3();
-    const records = recordsFromProps || recordsFromContext;
-    
-    const [currentPage, setCurrentPage] = useState(1);
-    const recordsPerPage = 5;
+export default function RecordList() {
+    // --- USE THE SIGNER FROM CONTEXT ---
+    const { signer, contract, account, records: patientRecords } = useWeb3(); // Get records from context
+    const [records, setRecords] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [decryptionStates, setDecryptionStates] = useState({});
 
-    const totalPages = Math.ceil(records.length / recordsPerPage);
-    const indexOfLastRecord = currentPage * recordsPerPage;
-    const indexOfFirstRecord = indexOfLastRecord - recordsPerPage;
-    const currentRecords = records.slice(indexOfFirstRecord, indexOfLastRecord);
+    useEffect(() => {
+        const fetchRecordsAndMetadata = async () => {
+            if (contract && account && patientRecords) {
+                try {
+                    setIsLoading(true);
+                    const recordsWithMetadata = await Promise.all(
+                        patientRecords.map(async (record) => {
+                            try {
+                                const metadataUrl = `https://gateway.pinata.cloud/ipfs/${record.ipfsHash}`;
+                                const response = await fetch(metadataUrl);
+                                if (!response.ok) {
+                                    return { ipfsHash: record.ipfsHash, timestamp: Number(record.timestamp), description: "Could not load metadata.", fileName: "Unknown" };
+                                }
+                                const metadata = await response.json();
+                                return {
+                                    ipfsHash: record.ipfsHash,
+                                    timestamp: Number(record.timestamp),
+                                    description: metadata.description || "No description.",
+                                    fileName: metadata.content?.[0]?.attachment?.title || "Unnamed",
+                                };
+                            } catch (error) {
+                                return { ipfsHash: record.ipfsHash, timestamp: Number(record.timestamp), description: "Error reading metadata.", fileName: "Unknown" };
+                            }
+                        })
+                    );
+                    setRecords(recordsWithMetadata);
+                } catch (error) {
+                    console.error("Failed to fetch records:", error);
+                    toast.error("Could not fetch your medical records.");
+                } finally {
+                    setIsLoading(false);
+                }
+            }
+        };
+        fetchRecordsAndMetadata();
+    }, [contract, account, patientRecords]);
 
-    const handleNextPage = () => {
-        if (currentPage < totalPages) {
-            setCurrentPage(currentPage + 1);
+    const handleDecryptAndDownload = async (metadataHash, index) => {
+        setDecryptionStates(prev => ({ ...prev, [index]: 'pending' }));
+        const toastId = toast.loading("Waiting for signature to generate decryption key...");
+
+        try {
+            // --- UPDATED CHECK ---
+            if (!signer) throw new Error("Wallet not connected or signer not available.");
+
+            // 1. Generate the decryption key from the signer in context
+            const decryptionKey = await getEncryptionKey(signer);
+
+            // 2. Fetch the metadata JSON from IPFS
+            toast.loading("Fetching record metadata...", { id: toastId });
+            const metadataUrl = `https://gateway.pinata.cloud/ipfs/${metadataHash}`;
+            const metadataResponse = await fetch(metadataUrl);
+            if (!metadataResponse.ok) throw new Error("Could not fetch metadata from IPFS.");
+            const metadata = await metadataResponse.json();
+
+            // 3. Extract the encrypted file's URL and the IV
+            const encryptedFileUrl = metadata.content?.[0]?.attachment?.url;
+            const ivBase64 = metadata.content?.[0]?.attachment?.data;
+            const fileName = metadata.content?.[0]?.attachment?.title || 'decrypted-file';
+
+            if (!encryptedFileUrl || !ivBase64) {
+                throw new Error("Invalid or corrupted record metadata.");
+            }
+
+            // 4. Fetch the encrypted file from IPFS
+            toast.loading("Fetching encrypted file...", { id: toastId });
+            const ipfsUrl = encryptedFileUrl.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/');
+            const encryptedResponse = await fetch(ipfsUrl);
+            if (!encryptedResponse.ok) throw new Error("Could not fetch encrypted file from IPFS.");
+            const encryptedData = await encryptedResponse.arrayBuffer();
+
+            // 5. Decrypt the file in the browser
+            toast.loading("Decrypting file...", { id: toastId });
+            const iv = base64ToUint8Array(ivBase64);
+            const decryptedData = await decryptFile(encryptedData, decryptionKey, iv);
+
+            // 6. Trigger download
+            const blob = new Blob([decryptedData], { type: metadata.content[0].attachment.contentType });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            a.remove();
+
+            toast.success("File decrypted and downloaded!", { id: toastId });
+            setDecryptionStates(prev => ({ ...prev, [index]: 'success' }));
+
+        } catch (error) {
+            console.error("Decryption failed:", error);
+            toast.error(error.message || "An error occurred during decryption.", { id: toastId });
+            setDecryptionStates(prev => ({ ...prev, [index]: 'error' }));
         }
     };
 
-    const handlePrevPage = () => {
-        if (currentPage > 1) {
-            setCurrentPage(currentPage - 1);
-        }
-    };
-
-    const formatDate = (timestamp) => {
-        const date = new Date(Number(timestamp) * 1000);
-        return date.toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
-    };
-
-    // --- Empty State ---
-    if (!records || records.length === 0) {
+    if (isLoading) {
         return (
-            <div className="w-full p-8 text-center bg-white rounded-xl shadow-md border border-slate-200">
-                <HistoryIcon />
-                <h3 className="text-xl font-bold text-slate-800 mt-4">No Records Found</h3>
-                <p className="text-slate-500 mt-1">This patient has not uploaded any medical documents yet.</p>
+            <div className="flex justify-center items-center p-12 bg-slate-50 rounded-lg">
+                <Spinner />
+                <p className="ml-4 text-slate-500">Loading your records from the blockchain...</p>
             </div>
         );
     }
 
-    // --- Main Component ---
+    if (records.length === 0) {
+        return <div className="text-center p-8 text-slate-500 bg-slate-50 rounded-lg">You have not uploaded any medical records yet.</div>;
+    }
+
     return (
         <div className="w-full bg-white rounded-xl shadow-md border border-slate-200">
             <div className="p-6 border-b border-slate-200">
-                <h3 className="text-xl font-bold text-slate-800">Medical History</h3>
-                <p className="text-slate-500 text-sm">{records.length} record(s) found</p>
+                <h3 className="text-xl font-bold text-slate-800">Your Medical Records</h3>
+                <p className="text-slate-500 mt-1">These records are encrypted and securely stored on IPFS.</p>
             </div>
-            
-            <ul className="divide-y divide-slate-200">
-                {currentRecords.map((record, index) => (
-                    <li key={index} className="p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between hover:bg-slate-50 transition-colors">
-                        <div className="flex items-center gap-4 mb-4 sm:mb-0">
-                            <div className="bg-teal-50 p-3 rounded-full">
-                                <FileIcon />
-                            </div>
-                            <div>
-                                <p className="font-semibold text-slate-800 break-all">
-                                    IPFS Hash: <span className="font-mono text-sm text-slate-600">{record.ipfsHash}</span>
-                                </p>
-                                <p className="text-sm text-slate-500">
-                                    Uploaded on: {formatDate(record.timestamp)}
-                                </p>
-                            </div>
+            <div className="divide-y divide-slate-200">
+                {records.map((record, index) => (
+                    <div key={record.ipfsHash} className="flex items-center justify-between p-4 hover:bg-slate-50 transition-colors">
+                        <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-md text-slate-800 truncate" title={record.description}>
+                                {record.description}
+                            </p>
+                            <p className="text-sm text-slate-500 mt-1 truncate" title={record.fileName}>
+                                Original File: {record.fileName}
+                            </p>
+                            <p className="text-xs text-slate-400 mt-2">
+                                Uploaded on: {record.timestamp ? format(new Date(record.timestamp * 1000), "PPpp") : 'N/A'}
+                            </p>
                         </div>
-                        <a
-                            href={`https://gateway.pinata.cloud/ipfs/${record.ipfsHash}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex-shrink-0 inline-flex items-center px-4 py-2 text-sm font-semibold text-white bg-slate-800 rounded-lg hover:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 transition-colors"
+                        <button
+                            onClick={() => handleDecryptAndDownload(record.ipfsHash, index)}
+                            // --- UPDATED DISABLED CHECK ---
+                            disabled={decryptionStates[index] === 'pending' || !signer}
+                            className="flex items-center gap-2 ml-4 px-4 py-2 text-sm font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-slate-400 transition-colors shadow"
                         >
-                            View on IPFS
-                            <ExternalLinkIcon />
-                        </a>
-                    </li>
+                            {decryptionStates[index] === 'pending' ? <SpinnerIcon /> : <DownloadIcon />}
+                            {decryptionStates[index] === 'pending' ? 'Processing...' : 'Decrypt & Download'}
+                        </button>
+                    </div>
                 ))}
-            </ul>
-
-            {/* --- Pagination Controls --- */}
-            {totalPages > 1 && (
-                <div className="p-4 flex items-center justify-between border-t border-slate-200">
-                    <button 
-                        onClick={handlePrevPage} 
-                        disabled={currentPage === 1}
-                        className="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        Previous
-                    </button>
-                    <span className="text-sm text-slate-500">
-                        Page {currentPage} of {totalPages}
-                    </span>
-                    <button 
-                        onClick={handleNextPage} 
-                        disabled={currentPage === totalPages}
-                        className="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        Next
-                    </button>
-                </div>
-            )}
+            </div>
         </div>
     );
 }
+

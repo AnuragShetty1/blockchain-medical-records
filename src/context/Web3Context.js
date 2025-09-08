@@ -20,6 +20,9 @@ export const Web3Provider = ({ children }) => {
     const [accessList, setAccessList] = useState([]);
     const [isLoadingProfile, setIsLoadingProfile] = useState(false);
     const [notifications, setNotifications] = useState([]);
+    // --- ADDED STATE for the Signer ---
+    const [signer, setSigner] = useState(null);
+
 
     const addNotification = (message) => {
         const newNotification = {
@@ -30,7 +33,7 @@ export const Web3Provider = ({ children }) => {
         };
         setNotifications(prev => [newNotification, ...prev]);
     };
-    
+
     const markNotificationsAsRead = () => {
         setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     };
@@ -105,8 +108,10 @@ export const Web3Provider = ({ children }) => {
                 const account = accounts[0];
                 setAccount(account);
                 const web3Provider = new ethers.BrowserProvider(window.ethereum);
-                const signer = await web3Provider.getSigner();
-                const contractInstance = new ethers.Contract(address, abi, signer);
+                const signerInstance = await web3Provider.getSigner();
+                // --- SAVE THE SIGNER TO STATE ---
+                setSigner(signerInstance);
+                const contractInstance = new ethers.Contract(address, abi, signerInstance);
                 setContract(contractInstance);
                 const contractOwner = await contractInstance.owner();
                 setOwner(contractOwner);
@@ -122,13 +127,36 @@ export const Web3Provider = ({ children }) => {
 
     // [FIX] Modified this useEffect to prevent duplicate listeners.
     useEffect(() => {
-        // Only set up listeners if we have a contract connection and a user account.
-        if (contract && account) {
-            console.log("Setting up event listeners... (This should now run only once per connection)");
+        // --- ADDED: Handle account changes ---
+        const handleAccountsChanged = (accounts) => {
+            if (accounts.length === 0) {
+                // Disconnected
+                setAccount(null);
+                setContract(null);
+                setSigner(null); // Clear signer
+                setUserProfile(null);
+                setIsRegistered(false);
+            } else {
+                // Switched account, reconnect to get new signer
+                connectWallet();
+            }
+        };
 
+        if (window.ethereum) {
+            window.ethereum.on('accountsChanged', handleAccountsChanged);
+        }
+
+        return () => {
+            if (window.ethereum) {
+                window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+            }
+        };
+    }, []); // Empty dependency array is correct here for setup/teardown
+
+    useEffect(() => {
+        if (contract && account) {
             const handleAccessRequested = (requestId, patientAddress, providerAddress, claimId) => {
                 if (patientAddress.toLowerCase() === account.toLowerCase()) {
-                    console.log("Notification: Access Requested");
                     addNotification(`An insurance provider has requested access for claim #${claimId}.`);
                     setTimeout(() => fetchPendingRequests(account, contract), 1000);
                 }
@@ -136,14 +164,12 @@ export const Web3Provider = ({ children }) => {
 
             const handleRecordAdded = (patientAddress) => {
                 if (patientAddress.toLowerCase() === account.toLowerCase()) {
-                    console.log("Notification: Record Added");
                     addNotification("A new medical record was successfully uploaded.");
                 }
             };
-            
+
             const handleUserVerified = (adminAddress, verifiedUserAddress) => {
                 if (verifiedUserAddress.toLowerCase() === account.toLowerCase()) {
-                    console.log("Notification: You've been verified!");
                     addNotification("Congratulations! Your account has been verified by an admin.");
                     checkUserRegistration(account, contract);
                 }
@@ -154,18 +180,16 @@ export const Web3Provider = ({ children }) => {
             contract.on('UserVerified', handleUserVerified);
 
             return () => {
-                console.log("Removing event listeners...");
                 contract.off('AccessRequested', handleAccessRequested);
                 contract.off('RecordAdded', handleRecordAdded);
                 contract.off('UserVerified', handleUserVerified);
             };
         }
-    // [FIX] The dependency array is changed. It no longer depends on `userProfile`.
-    // This ensures the listeners are not re-added every time the profile is updated.
     }, [contract, account]);
 
     return (
-        <Web3Context.Provider value={{ account, contract, owner, isRegistered, userProfile, records, requests, accessList, isLoadingProfile, notifications, connectWallet, checkUserRegistration, fetchPendingRequests, fetchAccessList, markNotificationsAsRead }}>
+        // --- EXPOSE THE SIGNER IN THE CONTEXT VALUE ---
+        <Web3Context.Provider value={{ signer, account, contract, owner, isRegistered, userProfile, records, requests, accessList, isLoadingProfile, notifications, connectWallet, checkUserRegistration, fetchPendingRequests, fetchAccessList, markNotificationsAsRead }}>
             {children}
         </Web3Context.Provider>
     );
@@ -174,3 +198,4 @@ export const Web3Provider = ({ children }) => {
 export const useWeb3 = () => {
     return useContext(Web3Context);
 };
+

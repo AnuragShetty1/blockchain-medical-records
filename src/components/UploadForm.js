@@ -3,7 +3,8 @@
 import { useState, useCallback } from 'react';
 import { useWeb3 } from '@/context/Web3Context';
 import toast from 'react-hot-toast';
-import { Fhir } from 'fhir'; // Import the FHIR library
+import { Fhir } from 'fhir';
+import { getEncryptionKey, encryptFile } from '@/utils/crypto';
 
 // --- SVG Icons ---
 const UploadCloudIcon = () => <svg className="w-12 h-12 mx-auto text-slate-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" /></svg>;
@@ -12,192 +13,125 @@ const CloseIcon = () => <svg className="w-4 h-4" xmlns="http://www.w3.org/2000/s
 
 
 export default function UploadForm() {
-    const { contract, checkUserRegistration, account } = useWeb3();
-    const [file, setFile] = useState(null);
-    const [isUploading, setIsUploading] = useState(false);
-    const [isDragActive, setIsDragActive] = useState(false);
-    const [description, setDescription] = useState(''); // State for the new description field
+    // --- USE THE SIGNER FROM CONTEXT ---
+    const { signer, contract, checkUserRegistration, account } = useWeb3();
+    const [file, setFile] = useState(null);
+    const [isUploading, setIsUploading] = useState(false);
+    const [isDragActive, setIsDragActive] = useState(false);
+    const [description, setDescription] = useState('');
 
-    const handleDrop = useCallback((e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsDragActive(false);
-        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-            setFile(e.dataTransfer.files[0]);
-        }
-    }, []);
+    const handleDrop = useCallback((e) => { e.preventDefault(); e.stopPropagation(); setIsDragActive(false); if (e.dataTransfer.files?.[0]) { setFile(e.dataTransfer.files[0]); } }, []);
+    const handleChange = (e) => { if (e.target.files?.[0]) { setFile(e.target.files[0]); } };
+    const handleDrag = useCallback((e) => { e.preventDefault(); e.stopPropagation(); }, []);
+    const handleDragEnter = useCallback((e) => { handleDrag(e); setIsDragActive(true); }, [handleDrag]);
+    const handleDragLeave = useCallback((e) => { handleDrag(e); setIsDragActive(false); }, [handleDrag]);
 
-    const handleChange = (e) => {
-        if (e.target.files && e.target.files[0]) {
-            setFile(e.target.files[0]);
-        }
-    };
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!file || !description) { toast.error("Please provide both a file and a description."); return; }
+        // --- UPDATED CHECK ---
+        if (!signer || !contract) { toast.error("Wallet not fully connected. Please wait and try again."); return; }
 
-    const handleDrag = useCallback((e) => {
-        e.preventDefault();
-        e.stopPropagation();
-    }, []);
+        setIsUploading(true);
+        const toastId = toast.loading("Waiting for signature to generate encryption key...");
 
-    const handleDragEnter = useCallback((e) => {
-        handleDrag(e);
-        setIsDragActive(true);
-    }, [handleDrag]);
+        try {
+            // Step 1: Generate encryption key from the signer in context
+            const encryptionKey = await getEncryptionKey(signer);
 
-    const handleDragLeave = useCallback((e) => {
-        handleDrag(e);
-        setIsDragActive(false);
-    }, [handleDrag]);
+            // Step 2: Read file and encrypt it
+            toast.loading("Encrypting file in browser...", { id: toastId });
+            const fileBuffer = await file.arrayBuffer();
+            const { encryptedData, iv } = await encryptFile(fileBuffer, encryptionKey);
+            const encryptedFileBlob = new Blob([encryptedData], { type: file.type });
+            
+            // Step 3: Upload the ENCRYPTED file to IPFS
+            toast.loading("Uploading encrypted file to IPFS...", { id: toastId });
+            const fileFormData = new FormData();
+            fileFormData.append("file", encryptedFileBlob, file.name);
+            const fileUploadResponse = await fetch('/api/upload', { method: 'POST', body: fileFormData });
+            const fileUploadData = await fileUploadResponse.json();
+            if (!fileUploadResponse.ok) throw new Error(fileUploadData.error || 'Failed to upload encrypted file');
+            const encryptedFileHash = fileUploadData.ipfsHash;
 
+            // Step 4: Create the FHIR metadata object, linking to the encrypted file
+            toast.loading("Creating standardized metadata...", { id: toastId });
+            const fhirResource = {
+                resourceType: "DocumentReference",
+                status: "current",
+                description: description,
+                content: [{
+                    attachment: {
+                        contentType: file.type || 'application/octet-stream',
+                        url: `ipfs://${encryptedFileHash}`,
+                        title: file.name,
+                        creation: new Date().toISOString(),
+                        data: Buffer.from(iv).toString('base64') 
+                    }
+                }]
+            };
+            const fhir = new Fhir();
+            const validationResult = fhir.validate(fhirResource);
+            if (!validationResult.valid) throw new Error("Failed to create a valid FHIR data structure.");
+            
+            // Step 5: Upload the FHIR METADATA to IPFS
+            toast.loading("Uploading metadata to IPFS...", { id: toastId });
+            const metadataBlob = new Blob([JSON.stringify(fhirResource, null, 2)], { type: 'application/fhir+json' });
+            const metadataFormData = new FormData();
+            metadataFormData.append("file", metadataBlob, `metadata-${Date.now()}.json`);
+            const metadataUploadResponse = await fetch('/api/upload', { method: 'POST', body: metadataFormData });
+            const metadataUploadData = await metadataUploadResponse.json();
+            if (!metadataUploadResponse.ok) throw new Error(metadataUploadData.error || 'Failed to upload metadata');
+            const metadataHash = metadataUploadData.ipfsHash;
+            
+            // Step 6: Add the METADATA hash to the blockchain
+            toast.loading("Adding record to blockchain...", { id: toastId });
+            const tx = await contract.addRecord(metadataHash);
+            await tx.wait();
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        if (!file || !description) {
-            toast.error("Please provide both a file and a description.");
-            return;
-        }
-        if (!contract) {
-            toast.error("Wallet not fully connected. Please wait and try again.");
-            return;
-        }
-        setIsUploading(true);
-        const toastId = toast.loading("Structuring data into FHIR format...");
+            toast.success("Record added successfully!", { id: toastId });
+            setFile(null);
+            setDescription('');
+            if (account && contract) await checkUserRegistration(account, contract);
 
-        try {
-            // Step 1: Create the FHIR DocumentReference object
-            const fhirResource = {
-                resourceType: "DocumentReference",
-                status: "current",
-                description: description,
-                content: [{
-                    attachment: {
-                        contentType: file.type || 'application/octet-stream',
-                        title: file.name,
-                        creation: new Date().toISOString()
-                    }
-                }]
-            };
+        } catch (error) {
+            console.error("Upload failed:", error);
+            toast.error(error.message || "An error occurred during upload.", { id: toastId });
+        } finally {
+            setIsUploading(false);
+        }
+    };
 
-            // Step 2: Validate the FHIR object
-            const fhir = new Fhir();
-            const validationResult = fhir.validate(fhirResource);
-            if (!validationResult.valid) {
-                console.error("FHIR Validation Errors:", validationResult.messages);
-                throw new Error("Failed to create a valid FHIR data structure.");
-            }
-
-            // Step 3: Convert the valid JSON object to a Blob to be uploaded
-            const fhirBlob = new Blob([JSON.stringify(fhirResource, null, 2)], { type: 'application/fhir+json' });
-
-            toast.loading("Uploading structured data to IPFS...", { id: toastId });
-            
-            // Step 4: Upload the FHIR Blob via our API route
-            const formData = new FormData();
-            // Use a consistent filename for the uploaded blob
-            formData.append("file", fhirBlob, `fhir-document-${Date.now()}.json`);
-            
-            const response = await fetch('/api/upload', {
-                method: 'POST',
-                body: formData,
-            });
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || 'Failed to upload to IPFS');
-            }
-            
-            const ipfsHash = data.ipfsHash;
-            toast.loading("File uploaded. Adding record to blockchain...", { id: toastId });
-
-            // Step 5: Add the record to the blockchain
-            const tx = await contract.addRecord(ipfsHash);
-            await tx.wait();
-
-            toast.success("Record added successfully!", { id: toastId });
-
-            // Reset form and refresh user data
-            setFile(null);
-            setDescription('');
-            if (account && contract) {
-                await checkUserRegistration(account, contract);
-            }
-
-        } catch (error) {
-            console.error("Upload failed:", error);
-            toast.error(error.message || "An error occurred during upload.", { id: toastId });
-        } finally {
-            setIsUploading(false);
-        }
-    };
-
-    return (
-        <div className="w-full p-8 mb-8 bg-white rounded-xl shadow-md border border-slate-200">
-            <h3 className="text-xl font-bold text-slate-800 mb-1">Upload New Record</h3>
-            <p className="text-slate-500 mb-6">Add a new medical document to your secure, on-chain history.</p>
-            
-            <form onSubmit={handleSubmit} className="space-y-6">
-                 {/* New Description Input */}
-                <div>
-                    <label htmlFor="description" className="block text-sm font-medium text-slate-700 mb-2">
-                        Record Description
-                    </label>
-                    <input
-                        type="text"
-                        id="description"
-                        value={description}
-                        onChange={(e) => setDescription(e.target.value)}
-                        placeholder="e.g., Annual Blood Test Results - Sept 2025"
-                        className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-                        required
-                    />
-                </div>
-
-                {/* File Input / Drop Zone */}
-                <div>
-                    {!file ? (
-                        <div
-                            onDrop={handleDrop}
-                            onDragOver={handleDrag}
-                            onDragEnter={handleDragEnter}
-                            onDragLeave={handleDragLeave}
-                            className={`relative block w-full px-12 py-10 text-center border-2 border-dashed rounded-lg cursor-pointer
-                                ${isDragActive ? 'border-teal-500 bg-teal-50' : 'border-slate-300 hover:border-slate-400'} transition-colors`}
-                        >
-                            <UploadCloudIcon />
-                            <span className="mt-2 block text-sm font-semibold text-slate-900">
-                                Drag and drop file here
-                            </span>
-                            <span className="mt-1 block text-xs text-slate-500">
-                                or click to browse
-                            </span>
-                            <input type="file" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleChange} />
-                        </div>
-                    ) : (
-                        <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-lg">
-                            <div className="flex items-center gap-3">
-                                <FileIcon />
-                                <span className="text-sm font-medium text-slate-800">{file.name}</span>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => setFile(null)}
-                                className="p-1 text-slate-500 rounded-full hover:bg-slate-200 hover:text-slate-800 transition-colors"
-                            >
-                                <CloseIcon />
-                            </button>
-                        </div>
-                    )}
-                </div>
-
-                {/* Submit Button */}
-                <button
-                    type="submit"
-                    disabled={isUploading || !file || !description || !contract}
-                    className="w-full px-4 py-3 font-bold text-white bg-teal-600 rounded-lg hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:bg-slate-400 transition-colors shadow-lg"
-                >
-                    {isUploading ? 'Processing...' : 'Upload and Add Record'}
-                </button>
-            </form>
-        </div>
-    );
+    return (
+        <div className="w-full p-8 mb-8 bg-white rounded-xl shadow-md border border-slate-200">
+            <h3 className="text-xl font-bold text-slate-800 mb-1">Upload New Secure Record</h3>
+            <p className="text-slate-500 mb-6">Your file will be encrypted in your browser before being uploaded.</p>
+            <form onSubmit={handleSubmit} className="space-y-6">
+                 <div>
+                    <label htmlFor="description" className="block text-sm font-medium text-slate-700 mb-2">Record Description</label>
+                    <input type="text" id="description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g., Annual Blood Test Results - Sept 2025" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" required />
+                </div>
+                <div>
+                    {!file ? (
+                        <div onDrop={handleDrop} onDragOver={handleDrag} onDragEnter={handleDragEnter} onDragLeave={handleDragLeave} className={`relative block w-full px-12 py-10 text-center border-2 border-dashed rounded-lg cursor-pointer ${isDragActive ? 'border-teal-500 bg-teal-50' : 'border-slate-300 hover:border-slate-400'} transition-colors`}>
+                            <UploadCloudIcon />
+                            <span className="mt-2 block text-sm font-semibold text-slate-900">Drag and drop file here</span>
+                            <span className="mt-1 block text-xs text-slate-500">or click to browse</span>
+                            <input type="file" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleChange} />
+                        </div>
+                    ) : (
+                        <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                            <div className="flex items-center gap-3"><FileIcon /> <span className="text-sm font-medium text-slate-800">{file.name}</span></div>
+                            <button type="button" onClick={() => setFile(null)} className="p-1 text-slate-500 rounded-full hover:bg-slate-200 hover:text-slate-800 transition-colors"><CloseIcon /></button>
+                        </div>
+                    )}
+                </div>
+                {/* --- UPDATED DISABLED CHECK --- */}
+                <button type="submit" disabled={isUploading || !file || !description || !signer} className="w-full px-4 py-3 font-bold text-white bg-teal-600 rounded-lg hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:bg-slate-400 transition-colors shadow-lg">
+                    {isUploading ? 'Processing...' : 'Encrypt & Upload Record'}
+                </button>
+            </form>
+        </div>
+    );
 }
 
