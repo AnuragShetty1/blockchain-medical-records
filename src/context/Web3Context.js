@@ -3,11 +3,42 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { ethers } from 'ethers';
 import toast from 'react-hot-toast';
+import { Web3Auth } from "@web3auth/modal";
+import { CHAIN_NAMESPACES, ADAPTER_EVENTS } from "@web3auth/base";
 
 import contractAddressData from '@/contracts/contract-address.json';
 import medicalRecordsArtifact from '@/contracts/MedicalRecords.json';
 
 const Web3Context = createContext();
+
+// --- CONFIGURATION ---
+
+const hardhatChainConfig = {
+    chainId: "0x7a69", // 31337 in hex
+    displayName: "Hardhat Local Network",
+    rpcTarget: "http://127.0.0.1:8545",
+    blockExplorer: "http://localhost:3000",
+    ticker: "ETH",
+    tickerName: "Ethereum",
+};
+const TARGET_CHAIN_ID = hardhatChainConfig.chainId;
+
+const initChainConfig = {
+    chainNamespace: CHAIN_NAMESPACES.EIP155,
+    chainId: "0x13881", // Polygon Mumbai
+    rpcTarget: "https://rpc.ankr.com/polygon_mumbai",
+    displayName: "Polygon Mumbai Testnet",
+    blockExplorer: "https://mumbai.polygonscan.com/",
+    ticker: "MATIC",
+    tickerName: "Matic",
+};
+
+const web3auth = new Web3Auth({
+    clientId: process.env.NEXT_PUBLIC_WEB3AUTH_CLIENT_ID,
+    web3AuthNetwork: "sapphire_devnet",
+    chainConfig: initChainConfig,
+});
+
 
 export const Web3Provider = ({ children }) => {
     const [account, setAccount] = useState(null);
@@ -18,11 +49,125 @@ export const Web3Provider = ({ children }) => {
     const [records, setRecords] = useState([]);
     const [requests, setRequests] = useState([]);
     const [accessList, setAccessList] = useState([]);
-    const [isLoadingProfile, setIsLoadingProfile] = useState(false);
+    const [isLoadingProfile, setIsLoadingProfile] = useState(true);
     const [notifications, setNotifications] = useState([]);
-    // --- ADDED STATE for the Signer ---
     const [signer, setSigner] = useState(null);
+    const [provider, setProvider] = useState(null);
 
+    const clearUserSession = () => {
+        setAccount(null);
+        setContract(null);
+        setOwner(null);
+        setUserProfile(null);
+        setIsRegistered(false);
+        setRecords([]);
+        setRequests([]);
+        setAccessList([]);
+        setSigner(null);
+        setProvider(null);
+    };
+
+    const disconnectWallet = async () => {
+        if (!web3auth) return;
+        try {
+            await web3auth.logout();
+            toast.success("You've been logged out.");
+        } catch (error) {
+            console.error("Error during logout:", error);
+            toast.error("Logout failed.");
+        }
+    };
+
+    const checkAndSwitchNetwork = async (currentProvider) => {
+        if (!currentProvider) return false;
+        try {
+            const web3Provider = new ethers.BrowserProvider(currentProvider);
+            const network = await web3Provider.getNetwork();
+            const currentChainId = `0x${network.chainId.toString(16)}`;
+
+            if (currentChainId === TARGET_CHAIN_ID) return true;
+
+            // This toast is removed as it's premature. Let MetaMask handle the prompt.
+            // toast("Please switch to the Hardhat network in your wallet.");
+            
+            try {
+                await currentProvider.request({
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: TARGET_CHAIN_ID }],
+                });
+                return true;
+            } catch (switchError) {
+                if (switchError.code === 4902) {
+                    try {
+                        await currentProvider.request({
+                            method: 'wallet_addEthereumChain',
+                            params: [hardhatChainConfig],
+                        });
+                        return true;
+                    } catch (addError) {
+                        toast.error("Failed to add Hardhat network to wallet.");
+                        console.error("Failed to add network:", addError);
+                        return false;
+                    }
+                } else {
+                    toast.error("Failed to switch network. Please do it manually in your wallet.");
+                    console.error("Failed to switch network:", switchError);
+                    return false;
+                }
+            }
+        } catch (error) {
+            console.error("Error checking/switching network:", error);
+            return false;
+        }
+    };
+
+    useEffect(() => {
+        const subscribeAuthEvents = () => {
+            web3auth.on(ADAPTER_EVENTS.CONNECTED, async (data) => {
+                console.log("Web3Auth connected via:", web3auth.connectedAdapterName);
+                setIsLoadingProfile(true);
+                const web3authProvider = web3auth.provider;
+
+                if (web3authProvider) {
+                    setProvider(web3authProvider);
+
+                    let isNetworkCorrect = true;
+                    if (web3auth.connectedAdapterName !== "openlogin") {
+                        isNetworkCorrect = await checkAndSwitchNetwork(web3authProvider);
+                    }
+
+                    if (isNetworkCorrect) {
+                        const finalProvider = new ethers.BrowserProvider(web3authProvider);
+                        const signerInstance = await finalProvider.getSigner();
+                        const userAddress = await signerInstance.getAddress();
+                        await setupUserSession(signerInstance, userAddress);
+                    } else {
+                        toast.error("Please connect to the correct network to use the app.");
+                        await disconnectWallet();
+                    }
+                }
+                setIsLoadingProfile(false);
+            });
+
+            web3auth.on(ADAPTER_EVENTS.DISCONNECTED, () => {
+                console.log("Web3Auth disconnected");
+                clearUserSession();
+            });
+        };
+
+        const init = async () => {
+            try {
+                subscribeAuthEvents();
+                await web3auth.init();
+            } catch (error) {
+                console.error("Error initializing Web3Auth:", error);
+                toast.error("Could not initialize authentication service.");
+            } finally {
+                setIsLoadingProfile(false);
+            }
+        };
+        init();
+    }, []);
 
     const addNotification = (message) => {
         const newNotification = {
@@ -93,65 +238,51 @@ export const Web3Provider = ({ children }) => {
             console.error("!!! CRITICAL ERROR in checkUserRegistration !!!", error);
             setIsRegistered(false);
             setUserProfile(null);
-        } finally {
-            setIsLoadingProfile(false);
+        }
+    };
+
+    const setupUserSession = async (signerInstance, userAddress) => {
+        try {
+            const address = contractAddressData.MedicalRecords;
+            const abi = medicalRecordsArtifact.abi;
+            const contractInstance = new ethers.Contract(address, abi, signerInstance);
+
+            await contractInstance.owner();
+
+            setAccount(userAddress);
+            setSigner(signerInstance);
+            setContract(contractInstance);
+            setOwner(await contractInstance.owner());
+            await checkUserRegistration(userAddress, contractInstance);
+
+            // Add the success toast here
+            toast.success("Connected successfully!");
+
+        } catch (error) {
+            console.error("Error setting up user session:", error);
+            const networkName = web3auth.connectedAdapterName === "openlogin" ? "Polygon Mumbai" : "Hardhat Local";
+            toast.error(`Contract not found. Please ensure it's deployed on the ${networkName} network.`);
+            await disconnectWallet();
         }
     };
 
     const connectWallet = async () => {
-        const address = contractAddressData.MedicalRecords;
-        const abi = medicalRecordsArtifact.abi;
-        if (window.ethereum) {
-            try {
-                setIsLoadingProfile(true);
-                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-                const account = accounts[0];
-                setAccount(account);
-                const web3Provider = new ethers.BrowserProvider(window.ethereum);
-                const signerInstance = await web3Provider.getSigner();
-                // --- SAVE THE SIGNER TO STATE ---
-                setSigner(signerInstance);
-                const contractInstance = new ethers.Contract(address, abi, signerInstance);
-                setContract(contractInstance);
-                const contractOwner = await contractInstance.owner();
-                setOwner(contractOwner);
-                await checkUserRegistration(account, contractInstance);
-            } catch (error) {
-                console.error("Error in connectWallet function:", error);
-                setIsLoadingProfile(false);
+        if (!web3auth) {
+            toast.error("Authentication service not ready.");
+            return;
+        }
+        try {
+            setIsLoadingProfile(true);
+            await web3auth.connect();
+        } catch (error) {
+            console.error("Error during wallet connection:", error);
+            if (!error.message.includes("User closed the modal")) {
+                toast.error("Connection failed. Please try again.");
             }
-        } else {
-            alert('Please install MetaMask!');
+        } finally {
+            setIsLoadingProfile(false);
         }
     };
-
-    // [FIX] Modified this useEffect to prevent duplicate listeners.
-    useEffect(() => {
-        // --- ADDED: Handle account changes ---
-        const handleAccountsChanged = (accounts) => {
-            if (accounts.length === 0) {
-                // Disconnected
-                setAccount(null);
-                setContract(null);
-                setSigner(null); // Clear signer
-                setUserProfile(null);
-                setIsRegistered(false);
-            } else {
-                // Switched account, reconnect to get new signer
-                connectWallet();
-            }
-        };
-
-        if (window.ethereum) {
-            window.ethereum.on('accountsChanged', handleAccountsChanged);
-        }
-
-        return () => {
-            if (window.ethereum) {
-                window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
-            }
-        };
-    }, []); // Empty dependency array is correct here for setup/teardown
 
     useEffect(() => {
         if (contract && account) {
@@ -188,8 +319,7 @@ export const Web3Provider = ({ children }) => {
     }, [contract, account]);
 
     return (
-        // --- EXPOSE THE SIGNER IN THE CONTEXT VALUE ---
-        <Web3Context.Provider value={{ signer, account, contract, owner, isRegistered, userProfile, records, requests, accessList, isLoadingProfile, notifications, connectWallet, checkUserRegistration, fetchPendingRequests, fetchAccessList, markNotificationsAsRead }}>
+        <Web3Context.Provider value={{ signer, account, contract, owner, isRegistered, userProfile, records, requests, accessList, isLoadingProfile, notifications, connectWallet, disconnectWallet, checkUserRegistration, fetchPendingRequests, fetchAccessList, markNotificationsAsRead }}>
             {children}
         </Web3Context.Provider>
     );
@@ -198,4 +328,5 @@ export const Web3Provider = ({ children }) => {
 export const useWeb3 = () => {
     return useContext(Web3Context);
 };
+
 

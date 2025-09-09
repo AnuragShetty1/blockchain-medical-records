@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.4.0",
+    "@web3auth/base": "^9.7.0",
+    "@web3auth/modal": "^10.3.0",
     "axios": "^1.11.0",
     "date-fns": "^4.1.0",
     "fhir": "^4.12.0",
