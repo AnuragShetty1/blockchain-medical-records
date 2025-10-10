@@ -14,7 +14,8 @@ const roles = [
 ];
 
 export default function RegistrationForm() {
-    const { contract, account, checkUserRegistration } = useWeb3(); 
+    // MODIFIED: Added generateAndSetKeyPair
+    const { contract, account, checkUserRegistration, generateAndSetKeyPair } = useWeb3(); 
     const [name, setName] = useState('');
     const [selectedRole, setSelectedRole] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -75,8 +76,15 @@ export default function RegistrationForm() {
         try {
             const tx = await contract.registerUser(name, selectedRole);
             await tx.wait();
-            toast.success('Registration successful! Updating your status...', { id: toastId });
-            await checkUserRegistration(account, contract);
+            
+            // NEW STEP: Generate and store the key pair after registration is confirmed.
+            await generateAndSetKeyPair();
+
+            toast.success('Registration successful! Please wait...', { id: toastId });
+            
+            // This will now correctly detect that the user needs to save their new key.
+            await checkUserRegistration();
+
         } catch (error) {
             console.error("Registration failed:", error);
             toast.error("Registration failed. The address may already be registered.", { id: toastId });

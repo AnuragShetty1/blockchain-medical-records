@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState, useEffect, createContext, useContext } from 'react';
+import React, { useState, useEffect, createContext, useContext, useCallback } from 'react'; // Import useCallback
 import { ethers } from 'ethers';
 import toast from 'react-hot-toast';
 import { Web3Auth } from "@web3auth/modal";
 import { CHAIN_NAMESPACES, ADAPTER_EVENTS } from "@web3auth/base";
+import { generateAndStoreKeyPair, loadKeyPair } from '@/utils/crypto';
 
 import contractAddressData from '@/contracts/contract-address.json';
 import medicalRecordsArtifact from '@/contracts/MedicalRecords.json';
@@ -12,7 +13,6 @@ import medicalRecordsArtifact from '@/contracts/MedicalRecords.json';
 const Web3Context = createContext();
 
 // --- CONFIGURATION ---
-
 const hardhatChainConfig = {
     chainId: "0x7a69", // 31337 in hex
     displayName: "Hardhat Local Network",
@@ -39,21 +39,28 @@ const web3auth = new Web3Auth({
     chainConfig: initChainConfig,
 });
 
-
 export const Web3Provider = ({ children }) => {
+    // Core Web3 State
     const [account, setAccount] = useState(null);
     const [contract, setContract] = useState(null);
+    const [signer, setSigner] = useState(null);
+    const [provider, setProvider] = useState(null);
     const [owner, setOwner] = useState(null);
+
+    // User & Session State
     const [userProfile, setUserProfile] = useState(null);
     const [isRegistered, setIsRegistered] = useState(false);
+    const [isLoadingProfile, setIsLoadingProfile] = useState(true);
+    const [keyPair, setKeyPair] = useState(null);
+    const [needsPublicKeySetup, setNeedsPublicKeySetup] = useState(false);
+
+    // App Data State
     const [records, setRecords] = useState([]);
     const [requests, setRequests] = useState([]);
     const [accessList, setAccessList] = useState([]);
-    const [isLoadingProfile, setIsLoadingProfile] = useState(true);
     const [notifications, setNotifications] = useState([]);
-    const [signer, setSigner] = useState(null);
-    const [provider, setProvider] = useState(null);
 
+    // --- SESSION MANAGEMENT ---
     const clearUserSession = () => {
         setAccount(null);
         setContract(null);
@@ -65,6 +72,8 @@ export const Web3Provider = ({ children }) => {
         setAccessList([]);
         setSigner(null);
         setProvider(null);
+        setKeyPair(null);
+        setNeedsPublicKeySetup(false);
     };
 
     const disconnectWallet = async () => {
@@ -77,7 +86,8 @@ export const Web3Provider = ({ children }) => {
             toast.error("Logout failed.");
         }
     };
-
+    
+    // --- NETWORK SWITCHING ---
     const checkAndSwitchNetwork = async (currentProvider) => {
         if (!currentProvider) return false;
         try {
@@ -86,9 +96,6 @@ export const Web3Provider = ({ children }) => {
             const currentChainId = `0x${network.chainId.toString(16)}`;
 
             if (currentChainId === TARGET_CHAIN_ID) return true;
-
-            // This toast is removed as it's premature. Let MetaMask handle the prompt.
-            // toast("Please switch to the Hardhat network in your wallet.");
             
             try {
                 await currentProvider.request({
@@ -121,161 +128,186 @@ export const Web3Provider = ({ children }) => {
         }
     };
 
-    useEffect(() => {
-        const subscribeAuthEvents = () => {
-            web3auth.on(ADAPTER_EVENTS.CONNECTED, async (data) => {
-                console.log("Web3Auth connected via:", web3auth.connectedAdapterName);
-                setIsLoadingProfile(true);
-                const web3authProvider = web3auth.provider;
-
-                if (web3authProvider) {
-                    setProvider(web3authProvider);
-
-                    let isNetworkCorrect = true;
-                    if (web3auth.connectedAdapterName !== "openlogin") {
-                        isNetworkCorrect = await checkAndSwitchNetwork(web3authProvider);
-                    }
-
-                    if (isNetworkCorrect) {
-                        const finalProvider = new ethers.BrowserProvider(web3authProvider);
-                        const signerInstance = await finalProvider.getSigner();
-                        const userAddress = await signerInstance.getAddress();
-                        await setupUserSession(signerInstance, userAddress);
-                    } else {
-                        toast.error("Please connect to the correct network to use the app.");
-                        await disconnectWallet();
-                    }
-                }
-                setIsLoadingProfile(false);
-            });
-
-            web3auth.on(ADAPTER_EVENTS.DISCONNECTED, () => {
-                console.log("Web3Auth disconnected");
-                clearUserSession();
-            });
-        };
-
-        const init = async () => {
-            try {
-                subscribeAuthEvents();
-                await web3auth.init();
-            } catch (error) {
-                console.error("Error initializing Web3Auth:", error);
-                toast.error("Could not initialize authentication service.");
-            } finally {
-                setIsLoadingProfile(false);
-            }
-        };
-        init();
-    }, []);
-
-    const addNotification = (message) => {
-        const newNotification = {
-            id: Date.now() + Math.random(),
-            message,
-            timestamp: new Date(),
-            read: false,
-        };
-        setNotifications(prev => [newNotification, ...prev]);
-    };
-
-    const markNotificationsAsRead = () => {
-        setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-    };
-
-    const fetchAccessList = async (userAddress, contractInstance) => {
+    // --- DATA FETCHING (STABILIZED WITH useCallback) ---
+    const fetchPendingRequests = useCallback(async (patientAddress, contractInstance) => {
+        if (!contractInstance || !patientAddress) return;
         try {
-            const addresses = await contractInstance.getAccessList(userAddress);
-            const userPromises = addresses.map(address => contractInstance.users(address));
-            const userDetails = await Promise.all(userPromises);
-            setAccessList(userDetails);
-        } catch (error) {
-            console.error("Could not fetch access list:", error);
-        }
-    };
-
-    const fetchPendingRequests = async (userAddress, contractInstance) => {
-        try {
-            const count = await contractInstance.getPatientRequestsCount(userAddress);
+            const count = await contractInstance.getPatientRequestsCount(patientAddress);
             const pendingReqs = [];
             for (let i = 0; i < count; i++) {
-                const req = await contractInstance.getPatientRequestAtIndex(userAddress, i);
+                const req = await contractInstance.getPatientRequestAtIndex(patientAddress, i);
                 if (Number(req.status) === 0) {
                     pendingReqs.push(req);
                 }
             }
             setRequests(pendingReqs);
         } catch (error) {
-            console.error("Could not fetch requests:", error);
+            console.error("Could not fetch access requests:", error);
         }
-    };
+    }, []);
 
-    const checkUserRegistration = async (signerAddress, contractInstance) => {
+    const fetchPatientData = useCallback(async (patientAddress, contractInstance) => {
+        if (!contractInstance || !patientAddress) return;
         try {
-            const user = await contractInstance.users(signerAddress);
-            if (user.walletAddress !== ethers.ZeroAddress) {
-                const profile = await contractInstance.userProfiles(signerAddress);
-                setUserProfile({
-                    walletAddress: user.walletAddress,
-                    role: user.role,
-                    isVerified: user.isVerified,
-                    name: profile.name,
-                    contactInfo: profile.contactInfo,
-                    profileMetadataURI: profile.profileMetadataURI,
-                });
-                setIsRegistered(true);
-                if (Number(user.role) === 0) {
-                    const patientRecords = await contractInstance.getPatientRecords(signerAddress);
-                    setRecords(patientRecords);
-                    await fetchPendingRequests(signerAddress, contractInstance);
-                    await fetchAccessList(signerAddress, contractInstance);
-                }
-            } else {
+            const recordIds = await contractInstance.getPatientRecordIds(patientAddress);
+            const recordsPromises = recordIds.map(id => contractInstance.getRecordById(id));
+            const fetchedRecords = await Promise.all(recordsPromises);
+            setRecords(fetchedRecords);
+            await fetchPendingRequests(patientAddress, contractInstance);
+        } catch (error) {
+            console.error("Could not fetch patient data:", error);
+        }
+    }, [fetchPendingRequests]);
+
+    // --- SESSION SETUP & STATE CHECKING ---
+    const checkUserRegistrationAndState = useCallback(async (userAddress, contractInstance, signerInstance) => {
+        setIsLoadingProfile(true);
+        try {
+            const user = await contractInstance.users(userAddress);
+    
+            if (user.walletAddress === ethers.ZeroAddress) {
                 setIsRegistered(false);
                 setUserProfile(null);
+                setNeedsPublicKeySetup(false);
+                setKeyPair(null);
+            } else {
+                setIsRegistered(true);
+                const profile = await contractInstance.userProfiles(userAddress);
+                const fullProfile = {
+                    walletAddress: user.walletAddress, role: user.role, isVerified: user.isVerified,
+                    publicKey: user.publicKey, name: profile.name, contactInfo: profile.contactInfo,
+                    profileMetadataURI: profile.profileMetadataURI,
+                };
+                setUserProfile(fullProfile);
+
+                const loadedKeyPair = await loadKeyPair(signerInstance);
+                setKeyPair(loadedKeyPair);
+
+                if (!fullProfile.publicKey || fullProfile.publicKey === "") {
+                    setNeedsPublicKeySetup(true);
+                } else {
+                    setNeedsPublicKeySetup(false);
+                    if (Number(user.role) === 0) { // Patient
+                        await fetchPatientData(userAddress, contractInstance);
+                    }
+                }
             }
         } catch (error) {
-            console.error("!!! CRITICAL ERROR in checkUserRegistration !!!", error);
-            setIsRegistered(false);
-            setUserProfile(null);
+            console.error("!!! CRITICAL ERROR in checkUserRegistrationAndState !!!", error);
+            toast.error("Could not verify user status. Please reconnect.");
+            await disconnectWallet();
+        } finally {
+            setIsLoadingProfile(false);
         }
-    };
+    }, [fetchPatientData]);
 
-    const setupUserSession = async (signerInstance, userAddress) => {
+    const setupUserSession = useCallback(async (signerInstance, userAddress) => {
         try {
             const address = contractAddressData.MedicalRecords;
             const abi = medicalRecordsArtifact.abi;
             const contractInstance = new ethers.Contract(address, abi, signerInstance);
-
+    
             await contractInstance.owner();
-
+    
             setAccount(userAddress);
             setSigner(signerInstance);
             setContract(contractInstance);
             setOwner(await contractInstance.owner());
-            await checkUserRegistration(userAddress, contractInstance);
-
-            // Add the success toast here
+            
+            await checkUserRegistrationAndState(userAddress, contractInstance, signerInstance);
+            
             toast.success("Connected successfully!");
-
         } catch (error) {
             console.error("Error setting up user session:", error);
-            const networkName = web3auth.connectedAdapterName === "openlogin" ? "Polygon Mumbai" : "Hardhat Local";
-            toast.error(`Contract not found. Please ensure it's deployed on the ${networkName} network.`);
+            toast.error(`Contract not found on Hardhat network. Please deploy it and check the address.`);
             await disconnectWallet();
+        }
+    }, [checkUserRegistrationAndState]);
+
+    const generateAndSetKeyPair = async () => {
+        if (!signer) {
+            toast.error("Signer not available. Cannot generate keys."); return;
+        }
+        try {
+            const newKeyPair = await generateAndStoreKeyPair(signer);
+            setKeyPair(newKeyPair);
+            return newKeyPair;
+        } catch (error) {
+            console.error("Error generating key pair:", error);
+            toast.error("Failed to generate security keys.");
         }
     };
 
-    const connectWallet = async () => {
-        if (!web3auth) {
-            toast.error("Authentication service not ready.");
-            return;
+    const savePublicKeyOnChain = async () => {
+        if (!contract || !keyPair?.publicKey) {
+            toast.error("Contract or public key not available."); return;
         }
         try {
-            setIsLoadingProfile(true);
+            const tx = await contract.savePublicKey(keyPair.publicKey);
+            const toastId = toast.loading("Saving your public key to the blockchain...");
+            await tx.wait();
+            toast.success("Security setup complete!", { id: toastId });
+            await checkUserRegistrationAndState(account, contract, signer);
+        } catch (error) {
+            console.error("Error saving public key:", error);
+            toast.error("Failed to save public key.");
+        }
+    };
+    
+    const addNotification = (message) => {
+        setNotifications(prev => [{ id: Date.now() + Math.random(), message, timestamp: new Date(), read: false }, ...prev]);
+    };
+
+    const markNotificationsAsRead = () => {
+        setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    };
+    
+    // --- WEB3AUTH INITIALIZATION & EVENT HANDLING ---
+    useEffect(() => {
+        const initWeb3Auth = async () => {
+            try {
+                web3auth.on(ADAPTER_EVENTS.CONNECTED, async (data) => {
+                    setIsLoadingProfile(true);
+                    const web3authProvider = web3auth.provider;
+                    if (!web3authProvider) return;
+                    
+                    setProvider(web3authProvider);
+                    let isNetworkCorrect = true;
+                    if (web3auth.connectedAdapterName !== "openlogin") {
+                        isNetworkCorrect = await checkAndSwitchNetwork(web3authProvider);
+                    }
+                    if (isNetworkCorrect) {
+                        const finalProvider = new ethers.BrowserProvider(web3authProvider);
+                        const signerInstance = await finalProvider.getSigner();
+                        const userAddress = await signerInstance.getAddress();
+                        await setupUserSession(signerInstance, userAddress);
+                    } else {
+                        toast.error("Please connect to the Hardhat network to use the app.");
+                        await disconnectWallet();
+                    }
+                    setIsLoadingProfile(false);
+                });
+                web3auth.on(ADAPTER_EVENTS.DISCONNECTED, () => {
+                    clearUserSession();
+                });
+                await web3auth.init();
+            } catch (error) {
+                console.error("Error initializing Web3Auth:", error);
+            } finally {
+                setIsLoadingProfile(false);
+            }
+        };
+        initWeb3Auth();
+    }, [setupUserSession]);
+    
+    const connectWallet = async () => {
+        if (!web3auth) {
+            toast.error("Authentication service not ready."); return;
+        }
+        setIsLoadingProfile(true);
+        try {
             await web3auth.connect();
         } catch (error) {
-            console.error("Error during wallet connection:", error);
             if (!error.message.includes("User closed the modal")) {
                 toast.error("Connection failed. Please try again.");
             }
@@ -283,43 +315,50 @@ export const Web3Provider = ({ children }) => {
             setIsLoadingProfile(false);
         }
     };
-
+    
+    // --- EVENT LISTENERS ---
     useEffect(() => {
         if (contract && account) {
-            const handleAccessRequested = (requestId, patientAddress, providerAddress, claimId) => {
+            const handleRecordAdded = (recordId, patientAddress, category) => {
                 if (patientAddress.toLowerCase() === account.toLowerCase()) {
-                    addNotification(`An insurance provider has requested access for claim #${claimId}.`);
-                    setTimeout(() => fetchPendingRequests(account, contract), 1000);
+                    addNotification(`A new record was added in category: ${category}.`);
+                    toast.success("New record detected! Refreshing your list...");
+                    
+                    // MODIFIED: Add a delay to account for node sync time
+                    setTimeout(() => {
+                        fetchPatientData(account, contract);
+                    }, 1000); // 1-second delay
                 }
             };
-
-            const handleRecordAdded = (patientAddress) => {
-                if (patientAddress.toLowerCase() === account.toLowerCase()) {
-                    addNotification("A new medical record was successfully uploaded.");
+            const handleUserVerified = (admin, verifiedUser) => {
+                if (verifiedUser.toLowerCase() === account.toLowerCase()) {
+                    addNotification("Congratulations! Your account has been verified.");
+                    checkUserRegistrationAndState(account, contract, signer);
                 }
             };
-
-            const handleUserVerified = (adminAddress, verifiedUserAddress) => {
-                if (verifiedUserAddress.toLowerCase() === account.toLowerCase()) {
-                    addNotification("Congratulations! Your account has been verified by an admin.");
-                    checkUserRegistration(account, contract);
-                }
-            };
-
-            contract.on('AccessRequested', handleAccessRequested);
+            
             contract.on('RecordAdded', handleRecordAdded);
             contract.on('UserVerified', handleUserVerified);
 
             return () => {
-                contract.off('AccessRequested', handleAccessRequested);
                 contract.off('RecordAdded', handleRecordAdded);
                 contract.off('UserVerified', handleUserVerified);
             };
         }
-    }, [contract, account]);
+    }, [contract, account, signer, fetchPatientData, checkUserRegistrationAndState]);
+
 
     return (
-        <Web3Context.Provider value={{ signer, account, contract, owner, isRegistered, userProfile, records, requests, accessList, isLoadingProfile, notifications, connectWallet, disconnectWallet, checkUserRegistration, fetchPendingRequests, fetchAccessList, markNotificationsAsRead }}>
+        <Web3Context.Provider value={{ 
+            signer, account, contract, owner, isRegistered, userProfile, 
+            records, requests, isLoadingProfile, notifications, keyPair, needsPublicKeySetup,
+            accessList,
+            connectWallet, disconnectWallet, 
+            checkUserRegistration: () => checkUserRegistrationAndState(account, contract, signer),
+            markNotificationsAsRead,
+            generateAndSetKeyPair,
+            savePublicKeyOnChain,
+        }}>
             {children}
         </Web3Context.Provider>
     );
@@ -328,5 +367,4 @@ export const Web3Provider = ({ children }) => {
 export const useWeb3 = () => {
     return useContext(Web3Context);
 };
-
 

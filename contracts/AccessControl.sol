@@ -3,40 +3,28 @@ pragma solidity ^0.8.24;
 
 import "./Roles.sol";
 
-contract AccessControl is Initializable, Roles {
+/**
+ * @title AccessControl
+ * @dev Manages access permissions for medical records.
+ * It is a logic contract that inherits state from Storage via Roles.
+ */
+contract AccessControl is Roles {
     // --- ERRORS ---
     error NotAPatient();
-    error NotAVerifiedDoctor();
+    error NotAVerifiedProfessional();
     error AccessAlreadyGranted();
     error NoAccessToRevoke();
     error NotAnInsuranceProvider();
     error RequestNotFound();
     error NotAuthorized();
+    error RecordNotFound();
+    error NotRecordOwner();
 
     // --- EVENTS ---
-    event AccessGranted(address indexed patient, address indexed doctor);
-    event AccessRevoked(address indexed patient, address indexed doctor);
+    event AccessGranted(uint256 indexed recordId, address indexed owner, address indexed grantee, uint256 expiration);
+    event AccessRevoked(uint256 indexed recordId, address indexed owner, address indexed grantee);
     event AccessRequested(uint256 indexed requestId, address indexed patient, address indexed provider, string claimId);
     event RequestApproved(uint256 indexed requestId, address indexed patient, uint256 accessDuration);
-
-    // --- DATA STRUCTURES ---
-    enum RequestStatus { Pending, Approved, Rejected }
-
-    struct AccessRequest {
-        uint256 id;
-        address patient;
-        address provider;
-        string claimId;
-        RequestStatus status;
-    }
-
-    // --- STATE VARIABLES ---
-    mapping(address => mapping(address => uint256)) public accessPermissions;
-    mapping(address => AccessRequest[]) public patientRequests;
-    uint256 private _nextRequestId;
-
-    mapping(address => address[]) private _grantedAccessList;
-    mapping(address => mapping(address => uint256)) private _grantedAccessIndex;
 
     // Internal initializer to set up the parent contract chain.
     function __AccessControl_init(address initialOwner) internal onlyInitializing {
@@ -44,35 +32,48 @@ contract AccessControl is Initializable, Roles {
     }
 
     // --- FUNCTIONS ---
-    function grantAccess(address _doctorAddress) public {
-        if (users[msg.sender].role != Role.Patient) { revert NotAPatient(); }
-        User storage doctor = users[_doctorAddress];
-        if (doctor.role != Role.Doctor || !doctor.isVerified) { revert NotAVerifiedDoctor(); }
-        if (accessPermissions[msg.sender][_doctorAddress] > block.timestamp) { revert AccessAlreadyGranted(); }
 
-        accessPermissions[msg.sender][_doctorAddress] = type(uint256).max;
-        _grantedAccessList[msg.sender].push(_doctorAddress);
-        _grantedAccessIndex[msg.sender][_doctorAddress] = _grantedAccessList[msg.sender].length;
+    /**
+     * @dev Grants a user timed access to a specific medical record.
+     * Only the owner of the record (the patient) can grant access.
+     */
+    function grantRecordAccess(uint256 _recordId, address _grantee, uint256 _durationInDays) public {
+        if (_recordId >= records.length) { revert RecordNotFound(); }
+        Record storage recordToAccess = records[_recordId];
+        if (recordToAccess.owner != msg.sender) { revert NotRecordOwner(); }
+        
+        User storage grantee = users[_grantee];
+        if (
+            grantee.role != Role.Doctor &&
+            grantee.role != Role.LabTechnician &&
+            grantee.role != Role.InsuranceProvider
+        ) { revert NotAVerifiedProfessional(); } // Simplified check for relevant roles
+        if (!grantee.isVerified) { revert NotAVerifiedProfessional(); }
 
-        emit AccessGranted(msg.sender, _doctorAddress);
+
+        uint256 expirationTime = block.timestamp + (_durationInDays * 1 days);
+        recordAccess[_recordId][_grantee] = expirationTime;
+
+        emit AccessGranted(_recordId, msg.sender, _grantee, expirationTime);
     }
 
-    function revokeAccess(address _userAddress) public {
-        if (users[msg.sender].role != Role.Patient) { revert NotAPatient(); }
-        if (accessPermissions[msg.sender][_userAddress] < block.timestamp) { revert NoAccessToRevoke(); }
+    /**
+     * @dev Revokes a user's access to a specific medical record.
+     * Only the owner of the record can revoke access.
+     */
+    function revokeRecordAccess(uint256 _recordId, address _grantee) public {
+        if (_recordId >= records.length) { revert RecordNotFound(); }
+        Record storage recordToAccess = records[_recordId];
+        if (recordToAccess.owner != msg.sender) { revert NotRecordOwner(); }
+        if (recordAccess[_recordId][_grantee] == 0) { revert NoAccessToRevoke(); }
 
-        accessPermissions[msg.sender][_userAddress] = 0;
-
-        uint256 indexToRemove = _grantedAccessIndex[msg.sender][_userAddress] - 1;
-        address lastAddress = _grantedAccessList[msg.sender][_grantedAccessList[msg.sender].length - 1];
-        _grantedAccessList[msg.sender][indexToRemove] = lastAddress;
-        _grantedAccessIndex[msg.sender][lastAddress] = indexToRemove + 1;
-        _grantedAccessList[msg.sender].pop();
-        delete _grantedAccessIndex[msg.sender][_userAddress];
-
-        emit AccessRevoked(msg.sender, _userAddress);
+        recordAccess[_recordId][_grantee] = 0;
+        emit AccessRevoked(_recordId, msg.sender, _grantee);
     }
 
+    /**
+     * @dev Allows an insurance provider to request access to a patient's records for a claim.
+     */
     function requestAccess(address _patientAddress, string memory _claimId) public {
        if (users[msg.sender].role != Role.InsuranceProvider) { revert NotAnInsuranceProvider(); }
        if (users[_patientAddress].role != Role.Patient) { revert NotAPatient(); }
@@ -87,30 +88,49 @@ contract AccessControl is Initializable, Roles {
        emit AccessRequested(requestId, _patientAddress, msg.sender, _claimId);
     }
 
+    /**
+     * @dev Allows a patient to approve an insurance provider's request, granting timed access
+     * to all of their current records.
+     */
     function approveRequest(uint256 _requestId, uint256 _durationInDays) public {
-       if (users[msg.sender].role != Role.Patient) { revert NotAPatient(); }
-       AccessRequest[] storage requests = patientRequests[msg.sender];
-       bool found = false;
-       for (uint i = 0; i < requests.length; i++) {
-           if (requests[i].id == _requestId && requests[i].status == RequestStatus.Pending) {
-               requests[i].status = RequestStatus.Approved;
-               uint256 expirationTime = block.timestamp + (_durationInDays * 1 days);
-               address provider = requests[i].provider;
+        if (users[msg.sender].role != Role.Patient) { revert NotAPatient(); }
+        AccessRequest[] storage requests = patientRequests[msg.sender];
+        bool found = false;
+        for (uint i = 0; i < requests.length; i++) {
+            if (requests[i].id == _requestId && requests[i].status == RequestStatus.Pending) {
+                requests[i].status = RequestStatus.Approved;
+                uint256 expirationTime = block.timestamp + (_durationInDays * 1 days);
+                address provider = requests[i].provider;
 
-               accessPermissions[msg.sender][provider] = expirationTime;
-               _grantedAccessList[msg.sender].push(provider);
-               _grantedAccessIndex[msg.sender][provider] = _grantedAccessList[msg.sender].length;
+                // Grant access to all existing records for this patient
+                uint256[] storage recordIds = patientRecordIds[msg.sender];
+                for (uint j = 0; j < recordIds.length; j++) {
+                    uint256 recordId = recordIds[j];
+                    recordAccess[recordId][provider] = expirationTime;
+                    emit AccessGranted(recordId, msg.sender, provider, expirationTime);
+                }
 
-               found = true;
-               emit RequestApproved(_requestId, msg.sender, _durationInDays);
-               break;
-           }
-       }
-       if (!found) { revert RequestNotFound(); }
+                found = true;
+                emit RequestApproved(_requestId, msg.sender, _durationInDays);
+                break;
+            }
+        }
+        if (!found) { revert RequestNotFound(); }
     }
 
-    function checkAccess(address _patientAddress, address _doctorAddress) public view returns (bool) {
-        return accessPermissions[_patientAddress][_doctorAddress] > block.timestamp;
+    // --- VIEW FUNCTIONS ---
+
+    /**
+     * @dev Checks if a user has access to a specific record.
+     * Access is granted if the user is the record owner, the original uploader,
+     * or has been granted explicit, non-expired access.
+     */
+    function checkRecordAccess(uint256 _recordId, address _viewer) public view returns (bool) {
+        if (_recordId >= records.length) { return false; }
+        Record storage recordToCheck = records[_recordId];
+        if (recordToCheck.owner == _viewer) { return true; }
+        if (recordToCheck.uploadedBy == _viewer) { return true; }
+        return recordAccess[_recordId][_viewer] > block.timestamp;
     }
 
     function getPatientRequestsCount(address _patientAddress) public view returns (uint256) {
@@ -122,10 +142,4 @@ contract AccessControl is Initializable, Roles {
         if (msg.sender != _patientAddress) { revert NotAuthorized(); }
         return patientRequests[_patientAddress][_index];
     }
-
-    function getAccessList(address _patientAddress) public view returns (address[] memory) {
-        if (msg.sender != _patientAddress) { revert NotAuthorized(); }
-        return _grantedAccessList[_patientAddress];
-    }
 }
-

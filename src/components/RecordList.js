@@ -4,112 +4,107 @@ import { useState, useEffect } from 'react';
 import { useWeb3 } from '@/context/Web3Context';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
-import { getEncryptionKey, decryptFile, base64ToUint8Array } from '@/utils/crypto';
+import { hybridDecrypt } from '@/utils/crypto';
 
-// --- SVG Icons ---
-const DownloadIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>;
+// --- SVG Icons (Unchanged) ---
+const ViewIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.432 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>;
+const ShareIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.186 2.25 2.25 0 00-3.933 2.186z" /></svg>;
 const SpinnerIcon = () => <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>;
 const Spinner = () => <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-slate-500"></div>;
 
+// Helper to get category styles
+const getCategoryStyle = (category) => {
+    switch (category) {
+        case 'lab-result': return { icon: '🔬', color: 'bg-blue-100 text-blue-800' };
+        case 'prescription': return { icon: '💊', color: 'bg-green-100 text-green-800' };
+        case 'doctor-note': return { icon: '📝', color: 'bg-yellow-100 text-yellow-800' };
+        case 'insurance-claim': return { icon: '📄', color: 'bg-indigo-100 text-indigo-800' };
+        default: return { icon: '📁', color: 'bg-slate-100 text-slate-800' };
+    }
+};
 
 export default function RecordList() {
-    // --- USE THE SIGNER FROM CONTEXT ---
-    const { signer, contract, account, records: patientRecords } = useWeb3(); // Get records from context
-    const [records, setRecords] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
+    const { account, records: patientRecords, keyPair, isLoadingProfile } = useWeb3();
+    const [recordsWithMetadata, setRecordsWithMetadata] = useState([]);
+    const [isFetchingMetadata, setIsFetchingMetadata] = useState(true);
     const [decryptionStates, setDecryptionStates] = useState({});
 
     useEffect(() => {
         const fetchRecordsAndMetadata = async () => {
-            if (contract && account && patientRecords) {
-                try {
-                    setIsLoading(true);
-                    const recordsWithMetadata = await Promise.all(
-                        patientRecords.map(async (record) => {
-                            try {
-                                const metadataUrl = `https://gateway.pinata.cloud/ipfs/${record.ipfsHash}`;
-                                const response = await fetch(metadataUrl);
-                                if (!response.ok) {
-                                    return { ipfsHash: record.ipfsHash, timestamp: Number(record.timestamp), description: "Could not load metadata.", fileName: "Unknown" };
-                                }
-                                const metadata = await response.json();
-                                return {
-                                    ipfsHash: record.ipfsHash,
-                                    timestamp: Number(record.timestamp),
-                                    description: metadata.description || "No description.",
-                                    fileName: metadata.content?.[0]?.attachment?.title || "Unnamed",
-                                };
-                            } catch (error) {
-                                return { ipfsHash: record.ipfsHash, timestamp: Number(record.timestamp), description: "Error reading metadata.", fileName: "Unknown" };
-                            }
-                        })
-                    );
-                    setRecords(recordsWithMetadata);
-                } catch (error) {
-                    console.error("Failed to fetch records:", error);
-                    toast.error("Could not fetch your medical records.");
-                } finally {
-                    setIsLoading(false);
+            if (!isLoadingProfile && patientRecords) {
+                setIsFetchingMetadata(true);
+                const fetchedRecords = [];
+                const validPatientRecords = patientRecords.filter(r => r && r[1]);
+
+                // --- DEFINITIVE FIX: Fetch records sequentially to avoid rate-limiting ---
+                for (const record of validPatientRecords) {
+                    const recordData = {
+                        id: Number(record[0]),
+                        metadataIPFSHash: String(record[1]),
+                        timestamp: Number(record[2]),
+                        patient: record[3],
+                        uploadedBy: record[4],
+                        isVerified: record[5],
+                        category: record[6],
+                    };
+
+                    try {
+                        const metadataUrl = `https://gateway.pinata.cloud/ipfs/${recordData.metadataIPFSHash}`;
+                        const response = await fetch(metadataUrl);
+                        if (!response.ok) {
+                            throw new Error(`Metadata fetch failed for ${recordData.metadataIPFSHash} with status ${response.status}`);
+                        }
+                        const metadata = await response.json();
+                        fetchedRecords.push({
+                            ...recordData,
+                            metadata,
+                        });
+                    } catch (error) {
+                        console.error(`Error processing record:`, error);
+                        fetchedRecords.push({
+                            ...recordData,
+                            metadata: { description: "Error: Could not load metadata.", fileName: "Unknown" }
+                        });
+                    }
                 }
+
+                setRecordsWithMetadata(fetchedRecords.sort((a, b) => b.timestamp - a.timestamp));
+                setIsFetchingMetadata(false);
+
+            } else if (!isLoadingProfile) {
+                setRecordsWithMetadata([]);
+                setIsFetchingMetadata(false);
             }
         };
         fetchRecordsAndMetadata();
-    }, [contract, account, patientRecords]);
+    }, [isLoadingProfile, patientRecords]);
 
-    const handleDecryptAndDownload = async (metadataHash, index) => {
+
+    const handleDecryptAndView = async (record, index) => {
+        if (!keyPair?.privateKey) {
+            toast.error("Private key not available. Cannot decrypt.");
+            return;
+        }
         setDecryptionStates(prev => ({ ...prev, [index]: 'pending' }));
-        const toastId = toast.loading("Waiting for signature to generate decryption key...");
-
+        const toastId = toast.loading("Fetching encrypted data bundle...");
         try {
-            // --- UPDATED CHECK ---
-            if (!signer) throw new Error("Wallet not connected or signer not available.");
+            const bundleHash = record.metadata.encryptedBundleIPFSHash;
+            if (!bundleHash) throw new Error("Invalid metadata: Bundle hash missing.");
+            
+            const bundleUrl = `https://gateway.pinata.cloud/ipfs/${bundleHash}`;
+            const response = await fetch(bundleUrl);
+            if (!response.ok) throw new Error("Could not fetch encrypted bundle from IPFS.");
+            const encryptedBundle = await response.json();
 
-            // 1. Generate the decryption key from the signer in context
-            const decryptionKey = await getEncryptionKey(signer);
+            toast.loading("Decrypting file in browser...", { id: toastId });
+            const decryptedData = await hybridDecrypt(encryptedBundle, keyPair.privateKey);
 
-            // 2. Fetch the metadata JSON from IPFS
-            toast.loading("Fetching record metadata...", { id: toastId });
-            const metadataUrl = `https://gateway.pinata.cloud/ipfs/${metadataHash}`;
-            const metadataResponse = await fetch(metadataUrl);
-            if (!metadataResponse.ok) throw new Error("Could not fetch metadata from IPFS.");
-            const metadata = await metadataResponse.json();
-
-            // 3. Extract the encrypted file's URL and the IV
-            const encryptedFileUrl = metadata.content?.[0]?.attachment?.url;
-            const ivBase64 = metadata.content?.[0]?.attachment?.data;
-            const fileName = metadata.content?.[0]?.attachment?.title || 'decrypted-file';
-
-            if (!encryptedFileUrl || !ivBase64) {
-                throw new Error("Invalid or corrupted record metadata.");
-            }
-
-            // 4. Fetch the encrypted file from IPFS
-            toast.loading("Fetching encrypted file...", { id: toastId });
-            const ipfsUrl = encryptedFileUrl.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/');
-            const encryptedResponse = await fetch(ipfsUrl);
-            if (!encryptedResponse.ok) throw new Error("Could not fetch encrypted file from IPFS.");
-            const encryptedData = await encryptedResponse.arrayBuffer();
-
-            // 5. Decrypt the file in the browser
-            toast.loading("Decrypting file...", { id: toastId });
-            const iv = base64ToUint8Array(ivBase64);
-            const decryptedData = await decryptFile(encryptedData, decryptionKey, iv);
-
-            // 6. Trigger download
-            const blob = new Blob([decryptedData], { type: metadata.content[0].attachment.contentType });
+            const blob = new Blob([decryptedData], { type: record.metadata.fileType });
             const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            a.download = fileName;
-            document.body.appendChild(a);
-            a.click();
+            window.open(url, '_blank');
             window.URL.revokeObjectURL(url);
-            a.remove();
-
-            toast.success("File decrypted and downloaded!", { id: toastId });
+            toast.success("File decrypted successfully!", { id: toastId });
             setDecryptionStates(prev => ({ ...prev, [index]: 'success' }));
-
         } catch (error) {
             console.error("Decryption failed:", error);
             toast.error(error.message || "An error occurred during decryption.", { id: toastId });
@@ -117,16 +112,16 @@ export default function RecordList() {
         }
     };
 
-    if (isLoading) {
+    if (isLoadingProfile || isFetchingMetadata) {
         return (
             <div className="flex justify-center items-center p-12 bg-slate-50 rounded-lg">
                 <Spinner />
-                <p className="ml-4 text-slate-500">Loading your records from the blockchain...</p>
+                <p className="ml-4 text-slate-500">Loading your records...</p>
             </div>
         );
     }
 
-    if (records.length === 0) {
+    if (!recordsWithMetadata || recordsWithMetadata.length === 0) {
         return <div className="text-center p-8 text-slate-500 bg-slate-50 rounded-lg">You have not uploaded any medical records yet.</div>;
     }
 
@@ -137,30 +132,56 @@ export default function RecordList() {
                 <p className="text-slate-500 mt-1">These records are encrypted and securely stored on IPFS.</p>
             </div>
             <div className="divide-y divide-slate-200">
-                {records.map((record, index) => (
-                    <div key={record.ipfsHash} className="flex items-center justify-between p-4 hover:bg-slate-50 transition-colors">
-                        <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-md text-slate-800 truncate" title={record.description}>
-                                {record.description}
-                            </p>
-                            <p className="text-sm text-slate-500 mt-1 truncate" title={record.fileName}>
-                                Original File: {record.fileName}
-                            </p>
-                            <p className="text-xs text-slate-400 mt-2">
-                                Uploaded on: {record.timestamp ? format(new Date(record.timestamp * 1000), "PPpp") : 'N/A'}
-                            </p>
+                {recordsWithMetadata.map((record, index) => {
+                    const isSelfUploaded = record.uploadedBy && account ? record.uploadedBy.toLowerCase() === account.toLowerCase() : false;
+                    const categoryStyle = getCategoryStyle(record.metadata?.category);
+                    
+                    return (
+                        <div key={record.id} className="flex flex-col md:flex-row items-start md:items-center justify-between p-4 hover:bg-slate-50 transition-colors">
+                            <div className="flex items-start gap-4 flex-1 min-w-0">
+                                <div className={`flex-shrink-0 w-12 h-12 rounded-lg flex items-center justify-center text-2xl ${categoryStyle.color}`}>
+                                    {categoryStyle.icon}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-3 flex-wrap">
+                                        <p className="font-semibold text-md text-slate-800 truncate" title={record.metadata?.description}>
+                                            {record.metadata?.description || "No description provided"}
+                                        </p>
+                                        {record.uploadedBy && (
+                                            <span className={`px-2 py-1 text-xs font-medium rounded-full ${record.isVerified ? 'bg-green-100 text-green-800' : (isSelfUploaded ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800')}`}>
+                                                {record.isVerified ? "Verified" : (isSelfUploaded ? "Self-Uploaded" : "Uploaded by Other")}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p className="text-sm text-slate-500 mt-1 truncate" title={record.metadata?.fileName}>
+                                        File: {record.metadata?.fileName || "Unknown"}
+                                    </p>
+                                    <p className="text-xs text-slate-400 mt-2">
+                                        Uploaded: {record.timestamp ? format(new Date(record.timestamp * 1000), "PPpp") : 'N/A'}
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2 mt-4 md:mt-0 md:ml-4 flex-shrink-0">
+                                <button
+                                    onClick={() => {/* TODO: Implement sharing */}}
+                                    disabled={true}
+                                    className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors shadow-sm"
+                                >
+                                    <ShareIcon />
+                                    Share
+                                </button>
+                                <button
+                                    onClick={() => handleDecryptAndView(record, index)}
+                                    disabled={decryptionStates[index] === 'pending' || !keyPair}
+                                    className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-slate-400 transition-colors shadow"
+                                >
+                                    {decryptionStates[index] === 'pending' ? <SpinnerIcon /> : <ViewIcon />}
+                                    {decryptionStates[index] === 'pending' ? 'Processing...' : 'Decrypt & View'}
+                                </button>
+                            </div>
                         </div>
-                        <button
-                            onClick={() => handleDecryptAndDownload(record.ipfsHash, index)}
-                            // --- UPDATED DISABLED CHECK ---
-                            disabled={decryptionStates[index] === 'pending' || !signer}
-                            className="flex items-center gap-2 ml-4 px-4 py-2 text-sm font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-slate-400 transition-colors shadow"
-                        >
-                            {decryptionStates[index] === 'pending' ? <SpinnerIcon /> : <DownloadIcon />}
-                            {decryptionStates[index] === 'pending' ? 'Processing...' : 'Decrypt & Download'}
-                        </button>
-                    </div>
-                ))}
+                    )
+                })}
             </div>
         </div>
     );

@@ -4,15 +4,16 @@
  * This file is updated to display the user's profile picture in the sidebar.
  * It uses the IPFS link from the userProfile and constructs a full URL
  * to fetch the image from an IPFS gateway.
+ * It is also updated to handle the one-time public key setup flow.
+ * It is now made resilient to undefined props to prevent crashing.
  */
 "use client";
 import { useState, useEffect } from "react";
 import { useWeb3 } from "@/context/Web3Context";
 import toast from 'react-hot-toast';
-import Image from 'next/image'; // Import Next.js Image component
+import Image from 'next/image';
 
-// (I'm omitting the SVG Icon components here for brevity, they are unchanged)
-// ... (DashboardIcon, RecordsIcon, etc. are still here) ...
+// SVG Icon components
 const DashboardIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>;
 const RecordsIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>;
 const AccessIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>;
@@ -26,11 +27,12 @@ import RecordList from "./RecordList";
 import AccessManager from "./AccessManager";
 import DoctorView from "./DoctorView";
 import RequestManager from "./RequestManager";
-import PendingVerification from "./PendingVerification"; 
+import PendingVerification from "./PendingVerification";
 import Profile from "./Profile";
+import PublicKeySetup from "./PublicKeySetup";
 
 export default function Dashboard() {
-    const { userProfile, records, requests, accessList } = useWeb3();
+    const { userProfile, records, requests, accessList, isRegistered, needsPublicKeySetup } = useWeb3();
     const [activeView, setActiveView] = useState('dashboard');
     const [greeting, setGreeting] = useState('Welcome');
 
@@ -45,14 +47,17 @@ export default function Dashboard() {
         return <div className="text-center p-10"><p>Loading user profile...</p></div>;
     }
 
-    // ... (Role checking logic is unchanged)
+    if (isRegistered && needsPublicKeySetup) {
+        return <PublicKeySetup />;
+    }
+
     const roleNames = ["Patient", "Doctor", "HospitalAdmin", "InsuranceProvider", "Pharmacist", "Researcher", "Guardian"];
     const role = roleNames[Number(userProfile.role)];
 
     if (role === "Doctor") {
         return userProfile.isVerified ? <DoctorView /> : <PendingVerification />;
     }
-    
+
     if (role !== "Patient") {
         return (
             <div className="text-center p-10">
@@ -65,11 +70,12 @@ export default function Dashboard() {
         navigator.clipboard.writeText(userProfile.walletAddress);
         toast.success('Address copied to clipboard!');
     };
-    
+
     const renderContent = () => {
         switch (activeView) {
             case 'dashboard':
-                return <DashboardOverview records={records} accessList={accessList} requests={requests} />;
+                // MODIFIED: Pass props safely with fallback to empty arrays
+                return <DashboardOverview records={records || []} accessList={accessList || []} requests={requests || []} />;
             case 'records':
                 return (
                     <div>
@@ -80,7 +86,7 @@ export default function Dashboard() {
                 );
             case 'access':
                 return (
-                     <div>
+                    <div>
                         <h2 className="text-3xl font-bold text-slate-800 mb-6">Access Management</h2>
                         <AccessManager />
                     </div>
@@ -100,19 +106,17 @@ export default function Dashboard() {
                     </div>
                 );
             default:
-                return <DashboardOverview records={records} accessList={accessList} requests={requests} />;
+                return <DashboardOverview records={records || []} accessList={accessList || []} requests={requests || []} />;
         }
     };
 
-    // Construct the profile image URL from the IPFS hash
-    const profileImageUrl = userProfile.profileMetadataURI 
+    const profileImageUrl = userProfile.profileMetadataURI
         ? `https://gateway.pinata.cloud/ipfs/${userProfile.profileMetadataURI}`
-        : '/default-avatar.svg'; // A default placeholder
+        : '/default-avatar.svg';
 
     return (
         <div className="w-full min-h-[calc(100vh-128px)] bg-slate-100 flex">
             <aside className="w-64 bg-white p-6 border-r border-slate-200 flex-col hidden md:flex">
-                {/* [MODIFIED] Added profile picture and adjusted layout */}
                 <div className="flex flex-col items-center text-center mb-8">
                     <Image
                         src={profileImageUrl}
@@ -120,14 +124,13 @@ export default function Dashboard() {
                         width={96}
                         height={96}
                         className="rounded-full object-cover w-24 h-24 border-4 border-slate-200 shadow-md mb-4"
-                        onError={(e) => { e.target.onerror = null; e.target.src='/default-avatar.svg'; }}
+                        onError={(e) => { e.target.onerror = null; e.target.src = '/default-avatar.svg'; }}
                     />
                     <h1 className="text-lg font-bold text-slate-800">{greeting},</h1>
                     <p className="text-2xl font-bold text-teal-600">{userProfile.name}!</p>
                 </div>
 
                 <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg mb-8">
-                    {/* ... (Status and Wallet Address sections are unchanged) ... */}
                     <div className="flex justify-between items-center mb-2">
                         <span className="font-semibold text-slate-700">Status</span>
                         <span className={`px-2 py-1 text-xs font-bold rounded-full ${userProfile.isVerified ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
@@ -146,11 +149,11 @@ export default function Dashboard() {
                 </div>
 
                 <nav className="flex flex-col space-y-2">
-                    {/* ... (Navigation items are unchanged) ... */}
                     <NavItem icon={<DashboardIcon />} label="Dashboard" active={activeView === 'dashboard'} onClick={() => setActiveView('dashboard')} />
                     <NavItem icon={<RecordsIcon />} label="My Records" active={activeView === 'records'} onClick={() => setActiveView('records')} />
                     <NavItem icon={<AccessIcon />} label="Access Management" active={activeView === 'access'} onClick={() => setActiveView('access')} />
-                    <NavItem icon={<RequestsIcon />} label="Pending Requests" active={activeView === 'requests'} onClick={() => setActiveView('requests')} notificationCount={requests.length} />
+                    {/* MODIFIED: Safe access for requests.length */}
+                    <NavItem icon={<RequestsIcon />} label="Pending Requests" active={activeView === 'requests'} onClick={() => setActiveView('requests')} notificationCount={requests?.length || 0} />
                     <NavItem icon={<ProfileIcon />} label="My Profile" active={activeView === 'profile'} onClick={() => setActiveView('profile')} />
                 </nav>
             </aside>
@@ -162,14 +165,11 @@ export default function Dashboard() {
     );
 }
 
-// --- Sub-components (NavItem, DashboardOverview, etc. are unchanged) ---
-// ...
 const NavItem = ({ icon, label, active, onClick, notificationCount = 0 }) => (
     <button
         onClick={onClick}
-        className={`flex items-center space-x-3 px-4 py-3 rounded-lg font-semibold transition-colors duration-200 w-full text-left ${
-            active ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'
-        }`}
+        className={`flex items-center space-x-3 px-4 py-3 rounded-lg font-semibold transition-colors duration-200 w-full text-left ${active ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'
+            }`}
     >
         {icon}
         <span className="flex-1">{label}</span>
@@ -185,14 +185,16 @@ const DashboardOverview = ({ records, accessList, requests }) => (
     <div>
         <h2 className="text-3xl font-bold text-slate-800 mb-6">Dashboard Overview</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            <StatCard title="Total Records" value={records.length} icon={<RecordsIcon />} />
-            <StatCard title="Active Permissions" value={accessList.length} icon={<AccessIcon />} />
-            <StatCard title="Pending Requests" value={requests.length} icon={<RequestsIcon />} highlight={requests.length > 0} />
+            {/* MODIFIED: Safe access for lengths */}
+            <StatCard title="Total Records" value={records?.length || 0} icon={<RecordsIcon />} />
+            <StatCard title="Active Permissions" value={accessList?.length || 0} icon={<AccessIcon />} />
+            <StatCard title="Pending Requests" value={requests?.length || 0} icon={<RequestsIcon />} highlight={(requests?.length || 0) > 0} />
         </div>
 
         <div className="mt-10 bg-white rounded-lg shadow-sm border border-slate-200">
             <h3 className="text-xl font-bold text-slate-800 p-6 border-b border-slate-200">Recent Activity</h3>
-            <RecentActivityFeed records={records} accessList={accessList} requests={requests} />
+            {/* MODIFIED: Pass props safely with fallback to empty arrays */}
+            <RecentActivityFeed records={records || []} accessList={accessList || []} requests={requests || []} />
         </div>
     </div>
 );
@@ -211,7 +213,8 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
     const [activity, setActivity] = useState([]);
 
     useEffect(() => {
-        const recordActivities = records.map(r => ({
+        // MODIFIED: Ensure records is an array before mapping
+        const recordActivities = (records || []).map(r => ({
             type: 'Record Added',
             description: `New record uploaded.`,
             timestamp: Number(r.timestamp) * 1000,
@@ -220,19 +223,21 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
             bgColor: 'bg-sky-50'
         }));
 
-        const accessActivities = accessList.map((user, index) => ({
+        // MODIFIED: Ensure accessList is an array before mapping
+        const accessActivities = (accessList || []).map((user, index) => ({
             type: 'Access Granted',
             description: `Access granted to ${user.name || 'a provider'}.`,
-            timestamp: Date.now() - index * 1000,
+            timestamp: Date.now() - index * 1000, // This is placeholder logic
             icon: <AccessIcon />,
             color: 'text-green-500',
             bgColor: 'bg-green-50'
         }));
 
-        const requestActivities = requests.map((req, index) => ({
+        // MODIFIED: Ensure requests is an array before mapping
+        const requestActivities = (requests || []).map((req, index) => ({
             type: 'Request Received',
             description: `Access request for claim #${req.claimId}.`,
-            timestamp: Date.now() - index * 1000,
+            timestamp: Date.now() - index * 1000, // This is placeholder logic
             icon: <RequestsIcon />,
             color: 'text-amber-500',
             bgColor: 'bg-amber-50'
@@ -267,3 +272,4 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
         </ul>
     );
 };
+
