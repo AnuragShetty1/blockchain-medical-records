@@ -1,11 +1,8 @@
 /*
  * File: src/components/Dashboard.js
  * [MODIFIED]
- * This file is updated to display the user's profile picture in the sidebar.
- * It uses the IPFS link from the userProfile and constructs a full URL
- * to fetch the image from an IPFS gateway.
- * It is also updated to handle the one-time public key setup flow.
- * It is now made resilient to undefined props to prevent crashing.
+ * This file is updated to route verified professionals to their dedicated dashboards.
+ * It now renders DoctorDashboard and LabTechnicianDashboard based on user role.
  */
 "use client";
 import { useState, useEffect } from "react";
@@ -13,7 +10,21 @@ import { useWeb3 } from "@/context/Web3Context";
 import toast from 'react-hot-toast';
 import Image from 'next/image';
 
-// SVG Icon components
+// Import the new professional dashboards
+import DoctorDashboard from "./DoctorView"; // Still named DoctorView.js, but contains DoctorDashboard logic
+import LabTechnicianDashboard from "./LabTechnicianDashboard";
+
+// Keep other existing imports
+import UploadForm from "./UploadForm";
+import RecordList from "./RecordList";
+import AccessManager from "./AccessManager";
+import RequestManager from "./RequestManager";
+import PendingVerification from "./PendingVerification";
+import Profile from "./Profile";
+import PublicKeySetup from "./PublicKeySetup";
+
+
+// SVG Icon components (unchanged)
 const DashboardIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>;
 const RecordsIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>;
 const AccessIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>;
@@ -22,14 +33,6 @@ const CopyIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-
 const UploadIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>;
 const ProfileIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>;
 
-import UploadForm from "./UploadForm";
-import RecordList from "./RecordList";
-import AccessManager from "./AccessManager";
-import DoctorView from "./DoctorView";
-import RequestManager from "./RequestManager";
-import PendingVerification from "./PendingVerification";
-import Profile from "./Profile";
-import PublicKeySetup from "./PublicKeySetup";
 
 export default function Dashboard() {
     const { userProfile, records, requests, accessList, isRegistered, needsPublicKeySetup } = useWeb3();
@@ -51,30 +54,44 @@ export default function Dashboard() {
         return <PublicKeySetup />;
     }
 
-    const roleNames = ["Patient", "Doctor", "HospitalAdmin", "InsuranceProvider", "Pharmacist", "Researcher", "Guardian"];
+    const roleNames = ["Patient", "Doctor", "HospitalAdmin", "InsuranceProvider", "Pharmacist", "Researcher", "Guardian", "LabTechnician"];
     const role = roleNames[Number(userProfile.role)];
 
+    // --- NEW ROUTING LOGIC ---
     if (role === "Doctor") {
-        return userProfile.isVerified ? <DoctorView /> : <PendingVerification />;
+        return userProfile.isVerified ? <DoctorDashboard /> : <PendingVerification />;
     }
+    if (role === "LabTechnician") {
+        return userProfile.isVerified ? <LabTechnicianDashboard /> : <PendingVerification />;
+    }
+    // --- END NEW ROUTING LOGIC ---
 
     if (role !== "Patient") {
         return (
             <div className="text-center p-10">
-                <p>Error: Invalid user role. This dashboard is for patients only.</p>
+                <p>Dashboard for role "{role}" is not yet available.</p>
             </div>
         );
     }
 
     const handleCopyAddress = () => {
-        navigator.clipboard.writeText(userProfile.walletAddress);
-        toast.success('Address copied to clipboard!');
+        // execCommand is used for broader browser support.
+        const textArea = document.createElement("textarea");
+        textArea.value = userProfile.walletAddress;
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+            document.execCommand('copy');
+            toast.success('Address copied to clipboard!');
+        } catch (err) {
+            toast.error('Failed to copy address.');
+        }
+        document.body.removeChild(textArea);
     };
 
     const renderContent = () => {
         switch (activeView) {
             case 'dashboard':
-                // MODIFIED: Pass props safely with fallback to empty arrays
                 return <DashboardOverview records={records || []} accessList={accessList || []} requests={requests || []} />;
             case 'records':
                 return (
@@ -152,7 +169,6 @@ export default function Dashboard() {
                     <NavItem icon={<DashboardIcon />} label="Dashboard" active={activeView === 'dashboard'} onClick={() => setActiveView('dashboard')} />
                     <NavItem icon={<RecordsIcon />} label="My Records" active={activeView === 'records'} onClick={() => setActiveView('records')} />
                     <NavItem icon={<AccessIcon />} label="Access Management" active={activeView === 'access'} onClick={() => setActiveView('access')} />
-                    {/* MODIFIED: Safe access for requests.length */}
                     <NavItem icon={<RequestsIcon />} label="Pending Requests" active={activeView === 'requests'} onClick={() => setActiveView('requests')} notificationCount={requests?.length || 0} />
                     <NavItem icon={<ProfileIcon />} label="My Profile" active={activeView === 'profile'} onClick={() => setActiveView('profile')} />
                 </nav>
@@ -185,7 +201,6 @@ const DashboardOverview = ({ records, accessList, requests }) => (
     <div>
         <h2 className="text-3xl font-bold text-slate-800 mb-6">Dashboard Overview</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {/* MODIFIED: Safe access for lengths */}
             <StatCard title="Total Records" value={records?.length || 0} icon={<RecordsIcon />} />
             <StatCard title="Active Permissions" value={accessList?.length || 0} icon={<AccessIcon />} />
             <StatCard title="Pending Requests" value={requests?.length || 0} icon={<RequestsIcon />} highlight={(requests?.length || 0) > 0} />
@@ -193,7 +208,6 @@ const DashboardOverview = ({ records, accessList, requests }) => (
 
         <div className="mt-10 bg-white rounded-lg shadow-sm border border-slate-200">
             <h3 className="text-xl font-bold text-slate-800 p-6 border-b border-slate-200">Recent Activity</h3>
-            {/* MODIFIED: Pass props safely with fallback to empty arrays */}
             <RecentActivityFeed records={records || []} accessList={accessList || []} requests={requests || []} />
         </div>
     </div>
@@ -213,7 +227,6 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
     const [activity, setActivity] = useState([]);
 
     useEffect(() => {
-        // MODIFIED: Ensure records is an array before mapping
         const recordActivities = (records || []).map(r => ({
             type: 'Record Added',
             description: `New record uploaded.`,
@@ -223,21 +236,19 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
             bgColor: 'bg-sky-50'
         }));
 
-        // MODIFIED: Ensure accessList is an array before mapping
         const accessActivities = (accessList || []).map((user, index) => ({
             type: 'Access Granted',
             description: `Access granted to ${user.name || 'a provider'}.`,
-            timestamp: Date.now() - index * 1000, // This is placeholder logic
+            timestamp: Date.now() - index * 1000, 
             icon: <AccessIcon />,
             color: 'text-green-500',
             bgColor: 'bg-green-50'
         }));
 
-        // MODIFIED: Ensure requests is an array before mapping
         const requestActivities = (requests || []).map((req, index) => ({
             type: 'Request Received',
             description: `Access request for claim #${req.claimId}.`,
-            timestamp: Date.now() - index * 1000, // This is placeholder logic
+            timestamp: Date.now() - index * 1000, 
             icon: <RequestsIcon />,
             color: 'text-amber-500',
             bgColor: 'bg-amber-50'

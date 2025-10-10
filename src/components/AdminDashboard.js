@@ -10,7 +10,8 @@ export default function AdminDashboard() {
     const [searchAddress, setSearchAddress] = useState('');
     const [searchedUser, setSearchedUser] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
-    const roleNames = ["Patient", "Doctor", "Hospital Admin", "Insurance Provider", "Pharmacist", "Researcher", "Guardian"];
+    // MODIFIED: Added LabTechnician to the array
+    const roleNames = ["Patient", "Doctor", "Hospital Admin", "Insurance Provider", "Pharmacist", "Researcher", "Guardian", "LabTechnician"];
 
     const handleSearch = async (e) => {
         e.preventDefault();
@@ -52,12 +53,19 @@ export default function AdminDashboard() {
             setIsLoading(false);
         }
     };
+    
+    // Determine if the searched user is a verifiable professional
+    const isVerifiableProfessional = searchedUser && !searchedUser.isVerified && (
+        Number(searchedUser.role) === 1 || // Doctor
+        Number(searchedUser.role) === 7   // LabTechnician
+    );
+    const roleName = searchedUser ? roleNames[Number(searchedUser.role)] : '';
 
     return (
         <div className="w-full max-w-4xl p-8 space-y-8 bg-white rounded-2xl shadow-lg">
             <div className="text-center">
                 <h2 className="text-3xl font-bold text-gray-900">Hospital Admin Dashboard</h2>
-                <p className="mt-2 text-gray-500">Search for users to view their status and verify doctors.</p>
+                <p className="mt-2 text-gray-500">Search for users to view their status and verify professionals.</p>
             </div>
 
             <div className="bg-slate-50 p-6 rounded-xl">
@@ -81,7 +89,7 @@ export default function AdminDashboard() {
                     <h3 className="text-xl font-bold mb-4">User Details</h3>
                     <div className="space-y-3">
                         <p><strong>Name:</strong> {searchedUser.name}</p>
-                        <p><strong>Role:</strong> {roleNames[Number(searchedUser.role)]}</p>
+                        <p><strong>Role:</strong> {roleName}</p>
                         <p><strong>Status:</strong> 
                             <span className={`ml-2 font-semibold ${searchedUser.isVerified ? 'text-green-600' : 'text-red-600'}`}>
                                 {searchedUser.isVerified ? "Verified" : "Not Verified"}
@@ -89,9 +97,10 @@ export default function AdminDashboard() {
                         </p>
                         <p className="font-mono text-sm"><strong>Address:</strong> {searchedUser.walletAddress}</p>
 
-                        {Number(searchedUser.role) === 1 && !searchedUser.isVerified && (
+                        {/* MODIFIED: Dynamic verification button */}
+                        {isVerifiableProfessional && (
                             <button onClick={handleVerify} disabled={isLoading} className="mt-4 w-full px-4 py-2 font-bold text-white bg-green-600 rounded-md hover:bg-green-700 disabled:bg-gray-400">
-                                {isLoading ? 'Verifying...' : 'Verify this Doctor'}
+                                {isLoading ? 'Verifying...' : `Verify this ${roleName}`}
                             </button>
                         )}
                     </div>
