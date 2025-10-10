@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, createContext, useContext, useCallback } from 'react'; // Import useCallback
+import React, { useState, useEffect, createContext, useContext, useCallback } from 'react';
 import { ethers } from 'ethers';
 import toast from 'react-hot-toast';
 import { Web3Auth } from "@web3auth/modal";
@@ -319,17 +319,33 @@ export const Web3Provider = ({ children }) => {
     // --- EVENT LISTENERS ---
     useEffect(() => {
         if (contract && account) {
-            const handleRecordAdded = (recordId, patientAddress, category) => {
+            // DEFINITIVE FIX: Switched to an intelligent refresh model.
+            const handleRecordAdded = async (recordId, patientAddress, category) => {
                 if (patientAddress.toLowerCase() === account.toLowerCase()) {
-                    addNotification(`A new record was added in category: ${category}.`);
-                    toast.success("New record detected! Refreshing your list...");
-                    
-                    // MODIFIED: Add a delay to account for node sync time
-                    setTimeout(() => {
-                        fetchPatientData(account, contract);
-                    }, 1000); // 1-second delay
+                    addNotification(`A new record in the ${category} category was added.`);
+                    toast.success("New record detected! Adding to your list...");
+
+                    try {
+                        // Fetch the new record directly by its ID from the event
+                        const newRecord = await contract.getRecordById(recordId);
+
+                        // Append the new record to the existing state immutably
+                        setRecords(prevRecords => {
+                            // Prevent adding duplicates if the event fires multiple times
+                            const recordExists = prevRecords.some(r => Number(r[0]) === Number(newRecord[0]));
+                            if (recordExists) {
+                                return prevRecords;
+                            }
+                            return [...prevRecords, newRecord];
+                        });
+                    } catch (error) {
+                        console.error("Failed to fetch new record by ID, falling back to full refresh.", error);
+                        // Fallback to fetching the entire list if direct fetch fails
+                        setTimeout(() => fetchPatientData(account, contract), 1000);
+                    }
                 }
             };
+
             const handleUserVerified = (admin, verifiedUser) => {
                 if (verifiedUser.toLowerCase() === account.toLowerCase()) {
                     addNotification("Congratulations! Your account has been verified.");
@@ -367,4 +383,3 @@ export const Web3Provider = ({ children }) => {
 export const useWeb3 = () => {
     return useContext(Web3Context);
 };
-

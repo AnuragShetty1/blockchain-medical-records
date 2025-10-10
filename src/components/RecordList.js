@@ -6,6 +6,11 @@ import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { hybridDecrypt } from '@/utils/crypto';
 
+// --- CONFIGURATION ---
+const CONCURRENT_FETCH_LIMIT = 3; // A safe limit for public gateways
+// DEFINITIVE FIX: Switched to a more tolerant public IPFS gateway to avoid 429 errors.
+const IPFS_GATEWAY = 'https://ipfs.io'; 
+
 // --- SVG Icons (Unchanged) ---
 const ViewIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.432 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>;
 const ShareIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.186 2.25 2.25 0 00-3.933 2.186z" /></svg>;
@@ -30,55 +35,115 @@ export default function RecordList() {
     const [decryptionStates, setDecryptionStates] = useState({});
 
     useEffect(() => {
-        const fetchRecordsAndMetadata = async () => {
-            if (!isLoadingProfile && patientRecords) {
-                setIsFetchingMetadata(true);
-                const fetchedRecords = [];
-                const validPatientRecords = patientRecords.filter(r => r && r[1]);
+        const controller = new AbortController();
+        const signal = controller.signal;
 
-                // --- DEFINITIVE FIX: Fetch records sequentially to avoid rate-limiting ---
-                for (const record of validPatientRecords) {
-                    const recordData = {
-                        id: Number(record[0]),
-                        metadataIPFSHash: String(record[1]),
-                        timestamp: Number(record[2]),
-                        patient: record[3],
-                        uploadedBy: record[4],
-                        isVerified: record[5],
-                        category: record[6],
-                    };
+        const processQueue = async (items, asyncProcess, onProgress) => {
+             let activePromises = 0;
+            const queue = [...items];
 
-                    try {
-                        const metadataUrl = `https://gateway.pinata.cloud/ipfs/${recordData.metadataIPFSHash}`;
-                        const response = await fetch(metadataUrl);
-                        if (!response.ok) {
-                            throw new Error(`Metadata fetch failed for ${recordData.metadataIPFSHash} with status ${response.status}`);
-                        }
-                        const metadata = await response.json();
-                        fetchedRecords.push({
-                            ...recordData,
-                            metadata,
-                        });
-                    } catch (error) {
-                        console.error(`Error processing record:`, error);
-                        fetchedRecords.push({
-                            ...recordData,
-                            metadata: { description: "Error: Could not load metadata.", fileName: "Unknown" }
-                        });
+            return new Promise((resolve, reject) => {
+                const processNext = () => {
+                    if (queue.length === 0 && activePromises === 0) {
+                        resolve();
+                        return;
                     }
+                    while (activePromises < CONCURRENT_FETCH_LIMIT && queue.length > 0) {
+                        activePromises++;
+                        const item = queue.shift();
+                        asyncProcess(item)
+                            .then(result => {
+                                if (!signal.aborted && result) {
+                                    onProgress(result);
+                                }
+                            })
+                            .catch(error => {
+                                if (error.name !== 'AbortError') {
+                                    console.error("Error in queue processing:", error);
+                                }
+                            })
+                            .finally(() => {
+                                activePromises--;
+                                processNext();
+                            });
+                    }
+                };
+                processNext();
+            });
+        };
+        
+        const fetchAndProcessRecord = async (record) => {
+            const recordData = {
+                id: Number(record[0]),
+                metadataIPFSHash: String(record[1]),
+                timestamp: Number(record[2]),
+                patient: record[3],
+                uploadedBy: record[4],
+                isVerified: record[5],
+                category: record[6],
+            };
+            
+            const metadataUrl = `${IPFS_GATEWAY}/ipfs/${recordData.metadataIPFSHash}`;
+            console.log(`[DEBUG] Attempting to fetch metadata for record ID: ${recordData.id} from ${metadataUrl}`);
+
+            try {
+                const response = await fetch(metadataUrl, { signal });
+                if (!response.ok) {
+                    throw new Error(`Gateway returned HTTP ${response.status}`);
                 }
-
-                setRecordsWithMetadata(fetchedRecords.sort((a, b) => b.timestamp - a.timestamp));
-                setIsFetchingMetadata(false);
-
-            } else if (!isLoadingProfile) {
-                setRecordsWithMetadata([]);
-                setIsFetchingMetadata(false);
+                const metadata = await response.json();
+                console.log(`[DEBUG] SUCCESS: Fetched and parsed metadata for record ID: ${recordData.id}`, metadata);
+                return { ...recordData, metadata };
+            } catch (error) {
+                if (error.name !== 'AbortError') {
+                    console.error(`[DEBUG] FAILED to fetch or parse metadata for record ID: ${recordData.id}. URL: ${metadataUrl}`, error);
+                    return { ...recordData, metadata: { description: "Error: Could not load metadata.", fileName: "Unknown" } };
+                }
+                return null;
             }
         };
-        fetchRecordsAndMetadata();
-    }, [isLoadingProfile, patientRecords]);
 
+        const fetchAllMetadata = async () => {
+            if (isLoadingProfile || !patientRecords) return;
+            
+            console.log("[DEBUG] Starting metadata fetch process...");
+            setIsFetchingMetadata(true);
+            setRecordsWithMetadata([]);
+
+            const validPatientRecords = patientRecords.filter(r => r && r[1] && typeof r[1] === 'string' && r[1].length > 0);
+            console.log(`[DEBUG] Found ${validPatientRecords.length} valid records to process.`);
+
+
+            if (validPatientRecords.length === 0) {
+                if (!signal.aborted) setIsFetchingMetadata(false);
+                return;
+            }
+
+            const handleProgress = (newlyFetchedRecord) => {
+                setRecordsWithMetadata(prev => {
+                    if (prev.some(r => r.id === newlyFetchedRecord.id)) {
+                        return prev;
+                    }
+                    return [...prev, newlyFetchedRecord].sort((a, b) => b.timestamp - a.timestamp);
+                });
+            };
+
+            await processQueue(validPatientRecords, fetchAndProcessRecord, handleProgress);
+            
+            if (!signal.aborted) {
+                console.log("[DEBUG] Metadata fetch process complete.");
+                setIsFetchingMetadata(false);
+            } else {
+                console.log("[DEBUG] Metadata fetch process was aborted.");
+            }
+        };
+
+        fetchAllMetadata();
+
+        return () => {
+            controller.abort();
+        };
+    }, [isLoadingProfile, patientRecords]);
 
     const handleDecryptAndView = async (record, index) => {
         if (!keyPair?.privateKey) {
@@ -91,7 +156,7 @@ export default function RecordList() {
             const bundleHash = record.metadata.encryptedBundleIPFSHash;
             if (!bundleHash) throw new Error("Invalid metadata: Bundle hash missing.");
             
-            const bundleUrl = `https://gateway.pinata.cloud/ipfs/${bundleHash}`;
+            const bundleUrl = `${IPFS_GATEWAY}/ipfs/${bundleHash}`;
             const response = await fetch(bundleUrl);
             if (!response.ok) throw new Error("Could not fetch encrypted bundle from IPFS.");
             const encryptedBundle = await response.json();
@@ -112,7 +177,7 @@ export default function RecordList() {
         }
     };
 
-    if (isLoadingProfile || isFetchingMetadata) {
+    if (isLoadingProfile || (isFetchingMetadata && recordsWithMetadata.length === 0)) {
         return (
             <div className="flex justify-center items-center p-12 bg-slate-50 rounded-lg">
                 <Spinner />
@@ -121,7 +186,7 @@ export default function RecordList() {
         );
     }
 
-    if (!recordsWithMetadata || recordsWithMetadata.length === 0) {
+    if (!isFetchingMetadata && (!recordsWithMetadata || recordsWithMetadata.length === 0)) {
         return <div className="text-center p-8 text-slate-500 bg-slate-50 rounded-lg">You have not uploaded any medical records yet.</div>;
     }
 

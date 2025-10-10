@@ -20,8 +20,6 @@ const getLocalStorageEncryptionKey = async (signer) => {
 
 /**
  * Generates a new P-256 key pair for elliptic curve cryptography and stores it securely.
- * The private key is encrypted with a key derived from the user's signature before being
- * stored in local storage.
  * @param {ethers.Signer} signer - The user's wallet signer instance.
  * @returns {Promise<{publicKey: string, privateKey: CryptoKey}>} The generated key pair.
  */
@@ -46,23 +44,23 @@ export const generateAndStoreKeyPair = async (signer) => {
         storageKey,
         privateKeyBytes
     );
-
-    localStorage.setItem(`encryptedPrivateKey-${await signer.getAddress()}`, JSON.stringify({
+    const userAddress = await signer.getAddress();
+    localStorage.setItem(`encryptedPrivateKey-${userAddress}`, JSON.stringify({
         iv: Array.from(iv),
         data: Array.from(new Uint8Array(encryptedPrivateKey))
     }));
-    localStorage.setItem(`publicKey-${await signer.getAddress()}`, publicKeyBase64);
+    localStorage.setItem(`publicKey-${userAddress}`, publicKeyBase64);
 
     return { publicKey: publicKeyBase64, privateKey: keyPair.privateKey };
 };
 
 /**
  * Loads the user's key pair from local storage.
- * It prompts for a signature to decrypt the stored private key.
  * @param {ethers.Signer} signer - The user's wallet signer instance.
  * @returns {Promise<{publicKey: string, privateKey: CryptoKey} | null>} The loaded key pair or null if not found.
  */
 export const loadKeyPair = async (signer) => {
+    if (!signer) return null;
     const userAddress = await signer.getAddress();
     const publicKey = localStorage.getItem(`publicKey-${userAddress}`);
     const encryptedKeyData = localStorage.getItem(`encryptedPrivateKey-${userAddress}`);
@@ -95,109 +93,125 @@ export const loadKeyPair = async (signer) => {
         return { publicKey, privateKey };
     } catch (error) {
         console.error("Failed to decrypt private key:", error);
-        // This could happen if the user clears cache or uses a different browser.
-        // The app should guide the user to recover/regenerate keys.
         return null;
     }
 };
 
-// --- HYBRID ENCRYPTION ---
+// --- HYBRID ENCRYPTION (ECIES IMPLEMENTATION) ---
 
 /**
- * Encrypts data using a hybrid approach.
+ * Encrypts data for multiple recipients using a standard ECIES approach.
  * @param {ArrayBuffer} data - The raw data to encrypt.
- * @param {string[]} recipientPublicKeys - An array of base64 encoded public keys of the recipients.
- * @returns {Promise<string>} A JSON string containing the encrypted data and encrypted symmetric keys.
+ * @param {string[]} recipientPublicKeysBase64 - An array of base64 encoded public keys.
+ * @returns {Promise<Object>} A serializable object containing the encrypted bundle.
  */
-export const hybridEncrypt = async (data, recipientPublicKeys) => {
-    // 1. Generate a random, one-time symmetric key for the file data.
+export const hybridEncrypt = async (data, recipientPublicKeysBase64) => {
     const symmetricKey = await window.crypto.subtle.generateKey(
         { name: 'AES-GCM', length: 256 },
         true,
         ['encrypt', 'decrypt']
     );
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
-
-    // 2. Encrypt the actual data with the symmetric key.
     const encryptedData = await window.crypto.subtle.encrypt(
         { name: 'AES-GCM', iv },
         symmetricKey,
         data
     );
 
-    // 3. Encrypt the symmetric key for each recipient with their public key.
     const encryptedSymmetricKeys = {};
-    for (const publicKeyBase64 of recipientPublicKeys) {
-        const publicKeyJwk = JSON.parse(window.atob(publicKeyBase64));
-        const publicKey = await window.crypto.subtle.importKey(
-            'jwk',
-            publicKeyJwk,
+    for (const publicKeyBase64 of recipientPublicKeysBase64) {
+        const ephemeralKeyPair = await window.crypto.subtle.generateKey(
             { name: 'ECDH', namedCurve: 'P-256' },
             true,
-            []
+            ['deriveKey']
         );
 
-        // This uses a clever trick: we derive a shared secret, then use that to "encrypt" the key.
-        const derivedKey = await window.crypto.subtle.deriveKey(
-            { name: 'ECDH', public: publicKey },
-            // A "dummy" private key is needed for the deriveKey call, but not used.
-            // In a real implementation, we would use our own private key here.
-            // However, we are encrypting FOR the recipient, so we use a dummy.
-            // Let's use a more robust method: wrapping the key.
-            (await window.crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256'}, true, ['deriveKey'])).privateKey,
+        const publicKeyJwk = JSON.parse(window.atob(publicKeyBase64));
+        const recipientPublicKey = await window.crypto.subtle.importKey(
+            'jwk', publicKeyJwk,
+            { name: 'ECDH', namedCurve: 'P-256' },
+            true, []
+        );
+
+        const sharedSecret = await window.crypto.subtle.deriveKey(
+            { name: 'ECDH', public: recipientPublicKey },
+            ephemeralKeyPair.privateKey,
             { name: 'AES-GCM', length: 256 },
-            true,
-            ['wrapKey', 'unwrapKey']
+            true, ['wrapKey', 'unwrapKey']
         );
-        // This is complex. A simpler, more standard approach is to use RSA-OAEP for key wrapping.
-        // But with ECDH, we need a key agreement protocol. Let's simplify for now.
-        // A better approach would be ECIES, but that's not native to Web Crypto.
-        // Let's assume for now we can wrap the key.
-        // For simplicity and to avoid a full ECIES implementation, we will use a placeholder.
-        // In a production system, a library like `eth-crypto` would be used.
-        // Let's simulate the encryption of the symmetric key.
-        // For now, let's just store it. This part needs to be improved.
-        const exportedSymmKey = await window.crypto.subtle.exportKey('raw', symmetricKey);
+        
+        const wrappedKey = await window.crypto.subtle.wrapKey(
+            'raw', symmetricKey, sharedSecret, { name: 'AES-GCM', iv: iv }
+        );
+        
+        const ephemeralPublicKeyJwk = await window.crypto.subtle.exportKey('jwk', ephemeralKeyPair.publicKey);
 
-        // In a real scenario, this `exportedSymmKey` would be encrypted with the recipient's public key.
-        // For the purpose of this build, we will simulate this.
-        encryptedSymmetricKeys[publicKeyBase64] = Array.from(new Uint8Array(exportedSymmKey));
+        encryptedSymmetricKeys[publicKeyBase64] = {
+            ephemeralPublicKey: ephemeralPublicKeyJwk,
+            wrappedKey: Array.from(new Uint8Array(wrappedKey))
+        };
     }
 
-
-    return JSON.stringify({
+    return {
         iv: Array.from(iv),
         encryptedData: Array.from(new Uint8Array(encryptedData)),
         encryptedSymmetricKeys,
-    });
+    };
 };
 
 /**
- * Decrypts data that was encrypted with the hybrid approach.
- * @param {string} encryptedJsonString - The JSON string from hybridEncrypt.
- * @param {CryptoKey} privateKey - The user's private key.
+ * Decrypts data that was encrypted with the ECIES hybrid approach.
+ * @param {Object} encryptedBundle - The object from hybridEncrypt.
+ * @param {CryptoKey} userPrivateKey - The user's own private key.
  * @returns {Promise<ArrayBuffer>} The decrypted raw data.
  */
-export const hybridDecrypt = async (encryptedJsonString, privateKey) => {
-    const { iv, encryptedData, encryptedSymmetricKeys } = JSON.parse(encryptedJsonString);
-    const userPublicKey = localStorage.getItem(`publicKey-${(await window.ethereum.request({ method: 'eth_accounts' }))[0]}`);
+export const hybridDecrypt = async (encryptedBundle, userPrivateKey) => {
+    const { iv, encryptedData, encryptedSymmetricKeys } = encryptedBundle;
 
-    if (!encryptedSymmetricKeys[userPublicKey]) {
-        throw new Error("You do not have a key to decrypt this file.");
+    let symmetricKey;
+
+    // Iterate through all possible keys for recipients.
+    for (const pubKeyBase64 in encryptedSymmetricKeys) {
+        try {
+            const { ephemeralPublicKey, wrappedKey } = encryptedSymmetricKeys[pubKeyBase64];
+            
+            const ephemeralPubKey = await window.crypto.subtle.importKey(
+                'jwk', ephemeralPublicKey,
+                { name: 'ECDH', namedCurve: 'P-256' },
+                true, []
+            );
+
+            // Derive the same shared secret using the ephemeral public key and our private key.
+            const sharedSecret = await window.crypto.subtle.deriveKey(
+                { name: 'ECDH', public: ephemeralPubKey },
+                userPrivateKey,
+                { name: 'AES-GCM', length: 256 },
+                true, ['wrapKey', 'unwrapKey']
+            );
+
+            // "Unwrap" (decrypt) the symmetric data key.
+            symmetricKey = await window.crypto.subtle.unwrapKey(
+                'raw', new Uint8Array(wrappedKey), sharedSecret,
+                { name: 'AES-GCM', iv: new Uint8Array(iv) },
+                { name: 'AES-GCM', length: 256 },
+                true, ['decrypt']
+            );
+
+            // If we successfully unwrapped a key, we've found our key. Break the loop.
+            if (symmetricKey) break; 
+        } catch (error) {
+            // This error is expected if we are not the intended recipient of this specific key.
+            // We log it for debugging but continue to the next key.
+            // console.log(`Attempted to decrypt with key ${pubKeyBase64} and failed. This is normal if you are not the recipient for this key.`);
+            continue;
+        }
     }
 
-    const encryptedSymmetricKey = new Uint8Array(encryptedSymmetricKeys[userPublicKey]);
+    if (!symmetricKey) {
+        throw new Error("Decryption failed: You are not a recipient of this file, or the data is corrupt.");
+    }
     
-    // In a real scenario, we would use the private key to decrypt `encryptedSymmetricKey`.
-    // Since we simulated the encryption, we will simulate the decryption.
-    const symmetricKey = await window.crypto.subtle.importKey(
-        'raw',
-        encryptedSymmetricKey,
-        { name: 'AES-GCM', length: 256 },
-        true,
-        ['decrypt']
-    );
-
+    // Decrypt the main data bundle with the successfully unwrapped symmetric key.
     const decryptedData = await window.crypto.subtle.decrypt(
         { name: 'AES-GCM', iv: new Uint8Array(iv) },
         symmetricKey,
