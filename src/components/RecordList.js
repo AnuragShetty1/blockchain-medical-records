@@ -5,17 +5,20 @@ import { useWeb3 } from '@/context/Web3Context';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { hybridDecrypt } from '@/utils/crypto';
+import AccessManager from './AccessManager';
 
 // --- CONFIGURATION ---
-const CONCURRENT_FETCH_LIMIT = 3; // A safe limit for public gateways
-// DEFINITIVE FIX: Switched to a more tolerant public IPFS gateway to avoid 429 errors.
-const IPFS_GATEWAY = 'https://ipfs.io'; 
+const CONCURRENT_FETCH_LIMIT = 3;
+const IPFS_GATEWAY = 'https://ipfs.io';
 
-// --- SVG Icons (Unchanged) ---
+// --- ICONS ---
 const ViewIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.432 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>;
 const ShareIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.186 2.25 2.25 0 00-3.933 2.186z" /></svg>;
 const SpinnerIcon = () => <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>;
 const Spinner = () => <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-slate-500"></div>;
+const CheckSquareIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
+const CloseIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>;
+
 
 // Helper to get category styles
 const getCategoryStyle = (category) => {
@@ -34,7 +37,47 @@ export default function RecordList() {
     const [isFetchingMetadata, setIsFetchingMetadata] = useState(true);
     const [decryptionStates, setDecryptionStates] = useState({});
 
+    // --- STATE FOR BULK SHARING ---
+    const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+    const [recordsToShare, setRecordsToShare] = useState([]);
+    const [selectionMode, setSelectionMode] = useState(false);
+    const [selectedRecordIds, setSelectedRecordIds] = useState(new Set());
+
+    const handleToggleSelectionMode = () => {
+        setSelectionMode(!selectionMode);
+        setSelectedRecordIds(new Set()); // Clear selection when toggling mode
+    };
+
+    const handleRecordSelect = (recordId) => {
+        const newSelection = new Set(selectedRecordIds);
+        if (newSelection.has(recordId)) {
+            newSelection.delete(recordId);
+        } else {
+            newSelection.add(recordId);
+        }
+        setSelectedRecordIds(newSelection);
+    };
+
+    const handleOpenShareModal = (records) => {
+        setRecordsToShare(Array.isArray(records) ? records : [records]);
+        setIsShareModalOpen(true);
+    };
+
+    const handleCloseShareModal = () => {
+        setIsShareModalOpen(false);
+        setRecordsToShare([]);
+        // Exit selection mode after sharing is complete
+        setSelectionMode(false);
+        setSelectedRecordIds(new Set());
+    };
+
+    const getSelectedRecords = () => {
+        return recordsWithMetadata.filter(r => selectedRecordIds.has(r.id));
+    };
+    
+    // This useEffect hook for fetching data remains unchanged.
     useEffect(() => {
+        // ... (existing fetch logic is correct and remains here)
         const controller = new AbortController();
         const signal = controller.signal;
 
@@ -84,19 +127,15 @@ export default function RecordList() {
             };
             
             const metadataUrl = `${IPFS_GATEWAY}/ipfs/${recordData.metadataIPFSHash}`;
-            console.log(`[DEBUG] Attempting to fetch metadata for record ID: ${recordData.id} from ${metadataUrl}`);
-
+            
             try {
                 const response = await fetch(metadataUrl, { signal });
-                if (!response.ok) {
-                    throw new Error(`Gateway returned HTTP ${response.status}`);
-                }
+                if (!response.ok) throw new Error(`Gateway returned HTTP ${response.status}`);
                 const metadata = await response.json();
-                console.log(`[DEBUG] SUCCESS: Fetched and parsed metadata for record ID: ${recordData.id}`, metadata);
                 return { ...recordData, metadata };
             } catch (error) {
                 if (error.name !== 'AbortError') {
-                    console.error(`[DEBUG] FAILED to fetch or parse metadata for record ID: ${recordData.id}. URL: ${metadataUrl}`, error);
+                    console.error(`FAILED to fetch metadata for record ID: ${recordData.id}.`, error);
                     return { ...recordData, metadata: { description: "Error: Could not load metadata.", fileName: "Unknown" } };
                 }
                 return null;
@@ -106,13 +145,10 @@ export default function RecordList() {
         const fetchAllMetadata = async () => {
             if (isLoadingProfile || !patientRecords) return;
             
-            console.log("[DEBUG] Starting metadata fetch process...");
             setIsFetchingMetadata(true);
             setRecordsWithMetadata([]);
 
             const validPatientRecords = patientRecords.filter(r => r && r[1] && typeof r[1] === 'string' && r[1].length > 0);
-            console.log(`[DEBUG] Found ${validPatientRecords.length} valid records to process.`);
-
 
             if (validPatientRecords.length === 0) {
                 if (!signal.aborted) setIsFetchingMetadata(false);
@@ -121,21 +157,14 @@ export default function RecordList() {
 
             const handleProgress = (newlyFetchedRecord) => {
                 setRecordsWithMetadata(prev => {
-                    if (prev.some(r => r.id === newlyFetchedRecord.id)) {
-                        return prev;
-                    }
+                    if (prev.some(r => r.id === newlyFetchedRecord.id)) return prev;
                     return [...prev, newlyFetchedRecord].sort((a, b) => b.timestamp - a.timestamp);
                 });
             };
 
             await processQueue(validPatientRecords, fetchAndProcessRecord, handleProgress);
             
-            if (!signal.aborted) {
-                console.log("[DEBUG] Metadata fetch process complete.");
-                setIsFetchingMetadata(false);
-            } else {
-                console.log("[DEBUG] Metadata fetch process was aborted.");
-            }
+            if (!signal.aborted) setIsFetchingMetadata(false);
         };
 
         fetchAllMetadata();
@@ -145,7 +174,9 @@ export default function RecordList() {
         };
     }, [isLoadingProfile, patientRecords]);
 
+
     const handleDecryptAndView = async (record, index) => {
+        // ... (existing decrypt logic is correct and remains here)
         if (!keyPair?.privateKey) {
             toast.error("Private key not available. Cannot decrypt.");
             return;
@@ -191,64 +222,102 @@ export default function RecordList() {
     }
 
     return (
-        <div className="w-full bg-white rounded-xl shadow-md border border-slate-200">
-            <div className="p-6 border-b border-slate-200">
-                <h3 className="text-xl font-bold text-slate-800">Your Medical Records</h3>
-                <p className="text-slate-500 mt-1">These records are encrypted and securely stored on IPFS.</p>
-            </div>
-            <div className="divide-y divide-slate-200">
-                {recordsWithMetadata.map((record, index) => {
-                    const isSelfUploaded = record.uploadedBy && account ? record.uploadedBy.toLowerCase() === account.toLowerCase() : false;
-                    const categoryStyle = getCategoryStyle(record.metadata?.category);
-                    
-                    return (
-                        <div key={record.id} className="flex flex-col md:flex-row items-start md:items-center justify-between p-4 hover:bg-slate-50 transition-colors">
-                            <div className="flex items-start gap-4 flex-1 min-w-0">
-                                <div className={`flex-shrink-0 w-12 h-12 rounded-lg flex items-center justify-center text-2xl ${categoryStyle.color}`}>
-                                    {categoryStyle.icon}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-3 flex-wrap">
-                                        <p className="font-semibold text-md text-slate-800 truncate" title={record.metadata?.description}>
-                                            {record.metadata?.description || "No description provided"}
-                                        </p>
-                                        {record.uploadedBy && (
-                                            <span className={`px-2 py-1 text-xs font-medium rounded-full ${record.isVerified ? 'bg-green-100 text-green-800' : (isSelfUploaded ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800')}`}>
-                                                {record.isVerified ? "Verified" : (isSelfUploaded ? "Self-Uploaded" : "Uploaded by Other")}
-                                            </span>
-                                        )}
+        <>
+            <div className="w-full bg-white rounded-xl shadow-md border border-slate-200">
+                <div className="p-6 border-b border-slate-200 flex justify-between items-center">
+                    <div>
+                        <h3 className="text-xl font-bold text-slate-800">Your Medical Records</h3>
+                        <p className="text-slate-500 mt-1">These records are encrypted and securely stored on IPFS.</p>
+                    </div>
+                    <button
+                        onClick={handleToggleSelectionMode}
+                        className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-colors shadow-sm ${
+                            selectionMode ? 'bg-slate-200 text-slate-800' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50'
+                        }`}
+                    >
+                        {selectionMode ? <CloseIcon /> : <CheckSquareIcon />}
+                        {selectionMode ? 'Cancel' : 'Select'}
+                    </button>
+                </div>
+                <div className="divide-y divide-slate-200">
+                    {recordsWithMetadata.map((record, index) => {
+                        const isSelected = selectedRecordIds.has(record.id);
+                        return (
+                            <div key={record.id} className={`flex items-start justify-between p-4 transition-colors ${isSelected ? 'bg-teal-50' : 'hover:bg-slate-50'}`}>
+                                <div className="flex items-start gap-4 flex-1 min-w-0">
+                                    {selectionMode && (
+                                        <input
+                                            type="checkbox"
+                                            checked={isSelected}
+                                            onChange={() => handleRecordSelect(record.id)}
+                                            className="mt-1 h-5 w-5 rounded border-gray-300 text-teal-600 focus:ring-teal-500 cursor-pointer"
+                                        />
+                                    )}
+                                    <div className={`flex-shrink-0 w-12 h-12 rounded-lg flex items-center justify-center text-2xl ${getCategoryStyle(record.metadata?.category).color}`}>
+                                        {getCategoryStyle(record.metadata?.category).icon}
                                     </div>
-                                    <p className="text-sm text-slate-500 mt-1 truncate" title={record.metadata?.fileName}>
-                                        File: {record.metadata?.fileName || "Unknown"}
-                                    </p>
-                                    <p className="text-xs text-slate-400 mt-2">
-                                        Uploaded: {record.timestamp ? format(new Date(record.timestamp * 1000), "PPpp") : 'N/A'}
-                                    </p>
+                                    <div className="flex-1 min-w-0">
+                                         {/* ... record details ... */}
+                                         <p className="font-semibold text-md text-slate-800 truncate" title={record.metadata?.description}>
+                                             {record.metadata?.description || "No description provided"}
+                                         </p>
+                                         <p className="text-sm text-slate-500 mt-1 truncate" title={record.metadata?.fileName}>
+                                             File: {record.metadata?.fileName || "Unknown"}
+                                         </p>
+                                         <p className="text-xs text-slate-400 mt-2">
+                                             Uploaded: {record.timestamp ? format(new Date(record.timestamp * 1000), "PPpp") : 'N/A'}
+                                         </p>
+                                    </div>
                                 </div>
+                                {!selectionMode && (
+                                <div className="flex items-center gap-2 mt-4 md:mt-0 md:ml-4 flex-shrink-0">
+                                    <button
+                                        onClick={() => handleOpenShareModal(record)}
+                                        className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
+                                    >
+                                        <ShareIcon />
+                                        Share
+                                    </button>
+                                    <button
+                                        onClick={() => handleDecryptAndView(record, index)}
+                                        disabled={decryptionStates[index] === 'pending' || !keyPair}
+                                        className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-slate-400 transition-colors shadow"
+                                    >
+                                        {decryptionStates[index] === 'pending' ? <SpinnerIcon /> : <ViewIcon />}
+                                        {decryptionStates[index] === 'pending' ? 'Processing...' : 'Decrypt & View'}
+                                    </button>
+                                </div>
+                                )}
                             </div>
-                            <div className="flex items-center gap-2 mt-4 md:mt-0 md:ml-4 flex-shrink-0">
-                                <button
-                                    onClick={() => {/* TODO: Implement sharing */}}
-                                    disabled={true}
-                                    className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors shadow-sm"
-                                >
-                                    <ShareIcon />
-                                    Share
-                                </button>
-                                <button
-                                    onClick={() => handleDecryptAndView(record, index)}
-                                    disabled={decryptionStates[index] === 'pending' || !keyPair}
-                                    className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-slate-400 transition-colors shadow"
-                                >
-                                    {decryptionStates[index] === 'pending' ? <SpinnerIcon /> : <ViewIcon />}
-                                    {decryptionStates[index] === 'pending' ? 'Processing...' : 'Decrypt & View'}
-                                </button>
-                            </div>
-                        </div>
-                    )
-                })}
+                        )
+                    })}
+                </div>
             </div>
-        </div>
+
+            {/* --- FLOATING ACTION BAR --- */}
+            {selectionMode && selectedRecordIds.size > 0 && (
+                 <div className="fixed bottom-10 left-1/2 -translate-x-1/2 w-full max-w-md z-40 animate-fade-in-up">
+                    <div className="bg-slate-800 text-white rounded-xl shadow-2xl p-4 flex justify-between items-center mx-4">
+                        <p className="font-semibold">{selectedRecordIds.size} record(s) selected</p>
+                        <button
+                            onClick={() => handleOpenShareModal(getSelectedRecords())}
+                            className="flex items-center gap-2 px-4 py-2 font-bold text-slate-800 bg-teal-400 rounded-lg hover:bg-teal-300 transition-colors"
+                        >
+                            <ShareIcon />
+                            Share Selected
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* --- RENDER THE MODAL CONDITIONALLY --- */}
+            {isShareModalOpen && (
+                <AccessManager 
+                    records={recordsToShare}
+                    onClose={handleCloseShareModal}
+                />
+            )}
+        </>
     );
 }
 

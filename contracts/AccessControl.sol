@@ -44,11 +44,13 @@ contract AccessControl is Roles {
         
         User storage grantee = users[_grantee];
         if (
-            grantee.role != Role.Doctor &&
+            (grantee.role != Role.Doctor &&
             grantee.role != Role.LabTechnician &&
-            grantee.role != Role.InsuranceProvider
-        ) { revert NotAVerifiedProfessional(); } // Simplified check for relevant roles
-        if (!grantee.isVerified) { revert NotAVerifiedProfessional(); }
+            grantee.role != Role.InsuranceProvider &&
+            grantee.role != Role.Pharmacist && // Added for completeness
+            grantee.role != Role.Researcher) ||
+            !grantee.isVerified
+        ) { revert NotAVerifiedProfessional(); }
 
 
         uint256 expirationTime = block.timestamp + (_durationInDays * 1 days);
@@ -56,6 +58,36 @@ contract AccessControl is Roles {
 
         emit AccessGranted(_recordId, msg.sender, _grantee, expirationTime);
     }
+
+    /**
+     * @dev [NEW] Grants a user timed access to multiple medical records in a single transaction.
+     * Only the owner of the records (the patient) can grant access.
+     */
+    function grantMultipleRecordAccess(uint256[] memory _recordIds, address _grantee, uint256 _durationInDays) public {
+        User storage grantee = users[_grantee];
+        if (
+            (grantee.role != Role.Doctor &&
+            grantee.role != Role.LabTechnician &&
+            grantee.role != Role.InsuranceProvider &&
+            grantee.role != Role.Pharmacist &&
+            grantee.role != Role.Researcher) ||
+            !grantee.isVerified
+        ) { revert NotAVerifiedProfessional(); }
+
+        uint256 expirationTime = block.timestamp + (_durationInDays * 1 days);
+
+        for (uint i = 0; i < _recordIds.length; i++) {
+            uint256 recordId = _recordIds[i];
+            if (recordId < records.length) {
+                Record storage recordToAccess = records[recordId];
+                if (recordToAccess.owner == msg.sender) { // Check ownership for each record
+                    recordAccess[recordId][_grantee] = expirationTime;
+                    emit AccessGranted(recordId, msg.sender, _grantee, expirationTime);
+                }
+            }
+        }
+    }
+
 
     /**
      * @dev Revokes a user's access to a specific medical record.
