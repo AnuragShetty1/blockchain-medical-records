@@ -17,6 +17,7 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
     error NotAnAdmin();
     error UserNotFound();
     error PublicKeyAlreadySet();
+    error CannotRegisterAsAdmin(); // <-- NEW CUSTOM ERROR
 
     // --- EVENTS ---
     event UserRegistered(address indexed userAddress, string name, Role role);
@@ -37,7 +38,7 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
      */
     function registerUser(string memory _name, Role _role) public {
         if (users[msg.sender].walletAddress != address(0)) { revert AlreadyRegistered(); }
-        if (_role == Role.HospitalAdmin) { revert("Cannot register as Admin directly."); }
+        if (_role == Role.HospitalAdmin) { revert CannotRegisterAsAdmin(); } // <-- UPDATED
 
         users[msg.sender] = User({
             walletAddress: msg.sender,

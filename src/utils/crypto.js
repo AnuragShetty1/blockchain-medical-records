@@ -201,8 +201,6 @@ export const hybridDecrypt = async (encryptedBundle, userPrivateKey) => {
             if (symmetricKey) break; 
         } catch (error) {
             // This error is expected if we are not the intended recipient of this specific key.
-            // We log it for debugging but continue to the next key.
-            // console.log(`Attempted to decrypt with key ${pubKeyBase64} and failed. This is normal if you are not the recipient for this key.`);
             continue;
         }
     }
@@ -220,6 +218,113 @@ export const hybridDecrypt = async (encryptedBundle, userPrivateKey) => {
 
     return decryptedData;
 };
+
+
+// --- [NEW] KEY WRAPPING FOR SHARING ---
+
+/**
+ * [NEW] Re-wraps the symmetric key of an encrypted bundle for a new recipient.
+ * This is used when a patient shares a record with a professional.
+ * @param {Object} encryptedBundle - The full encrypted object from IPFS.
+ * @param {CryptoKey} patientPrivateKey - The patient's private key to decrypt the original DEK.
+ * @param {string} professionalPublicKeyBase64 - The professional's public key to re-encrypt for.
+ * @returns {Promise<Uint8Array>} The re-wrapped key bundle as a Uint8Array, ready for the smart contract.
+ */
+export const rewrapSymmetricKey = async (encryptedBundle, patientPrivateKey, professionalPublicKeyBase64) => {
+    const { iv, encryptedSymmetricKeys } = encryptedBundle;
+    let symmetricKey;
+
+    // 1. Decrypt (unwrap) the original symmetric key using the patient's private key.
+    for (const pubKeyBase64 in encryptedSymmetricKeys) {
+        try {
+            const { ephemeralPublicKey, wrappedKey } = encryptedSymmetricKeys[pubKeyBase64];
+            const ephemeralPubKey = await window.crypto.subtle.importKey('jwk', ephemeralPublicKey, { name: 'ECDH', namedCurve: 'P-256' }, true, []);
+            const sharedSecret = await window.crypto.subtle.deriveKey(
+                { name: 'ECDH', public: ephemeralPubKey },
+                patientPrivateKey,
+                { name: 'AES-GCM', length: 256 },
+                true, ['wrapKey', 'unwrapKey']
+            );
+            symmetricKey = await window.crypto.subtle.unwrapKey(
+                'raw', new Uint8Array(wrappedKey), sharedSecret,
+                { name: 'AES-GCM', iv: new Uint8Array(iv) },
+                { name: 'AES-GCM', length: 256 },
+                true, ['encrypt', 'decrypt'] // Need both permissions for re-wrapping
+            );
+            if (symmetricKey) break;
+        } catch (e) {
+            continue;
+        }
+    }
+
+    if (!symmetricKey) {
+        throw new Error("Key re-wrapping failed: Could not decrypt the original symmetric key.");
+    }
+
+    // 2. Re-encrypt (wrap) the symmetric key for the professional.
+    const newEphemeralKeyPair = await window.crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey']);
+    const professionalPublicKeyJwk = JSON.parse(window.atob(professionalPublicKeyBase64));
+    const professionalPublicKey = await window.crypto.subtle.importKey('jwk', professionalPublicKeyJwk, { name: 'ECDH', namedCurve: 'P-256' }, true, []);
+    
+    const newSharedSecret = await window.crypto.subtle.deriveKey(
+        { name: 'ECDH', public: professionalPublicKey },
+        newEphemeralKeyPair.privateKey,
+        { name: 'AES-GCM', length: 256 },
+        true, ['wrapKey', 'unwrapKey']
+    );
+
+    const newWrappedKey = await window.crypto.subtle.wrapKey(
+        'raw', symmetricKey, newSharedSecret, { name: 'AES-GCM', iv: new Uint8Array(iv) }
+    );
+
+    const newEphemeralPublicKeyJwk = await window.crypto.subtle.exportKey('jwk', newEphemeralKeyPair.publicKey);
+
+    // 3. Package the new ephemeral public key and the newly wrapped key for the contract.
+    const rewrappedBundle = {
+        ephemeralPublicKey: newEphemeralPublicKeyJwk,
+        wrappedKey: Array.from(new Uint8Array(newWrappedKey))
+    };
+
+    // [FIX] Return a Uint8Array, which ethers can correctly process as `bytes`.
+    return new TextEncoder().encode(JSON.stringify(rewrappedBundle));
+};
+
+/**
+ * [NEW] Unwraps a symmetric key that was re-wrapped for the current user.
+ * This is used by a professional to get the DEK after a patient has shared a record.
+ * @param {string} rewrappedDekHex - The hex string of the re-wrapped key from the smart contract event.
+ * @param {ArrayBuffer} iv - The IV from the original encrypted file bundle.
+ * @param {CryptoKey} professionalPrivateKey - The professional's private key.
+ * @returns {Promise<CryptoKey>} The decrypted symmetric key (DEK).
+ */
+export const unwrapSymmetricKey = async (rewrappedDekHex, iv, professionalPrivateKey) => {
+    // [FIX] Ethers returns `bytes` from events as a hex string. Decode it to get the original JSON.
+    const rewrappedDekString = ethers.toUtf8String(rewrappedDekHex);
+    const { ephemeralPublicKey, wrappedKey } = JSON.parse(rewrappedDekString);
+    
+    const ephemeralPubKey = await window.crypto.subtle.importKey(
+        'jwk', ephemeralPublicKey,
+        { name: 'ECDH', namedCurve: 'P-256' },
+        true, []
+    );
+
+    const sharedSecret = await window.crypto.subtle.deriveKey(
+        { name: 'ECDH', public: ephemeralPubKey },
+        professionalPrivateKey,
+        { name: 'AES-GCM', length: 256 },
+        true, ['wrapKey', 'unwrapKey']
+    );
+
+    const symmetricKey = await window.crypto.subtle.unwrapKey(
+        'raw', new Uint8Array(wrappedKey), sharedSecret,
+        { name: 'AES-GCM', iv: new Uint8Array(iv) },
+        { name: 'AES-GCM', length: 256 },
+        true, ['decrypt']
+    );
+
+    return symmetricKey;
+};
+
 
 // Helper function to convert a Base64 string back to a Uint8Array
 export const base64ToUint8Array = (base64) => {

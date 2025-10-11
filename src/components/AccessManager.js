@@ -3,20 +3,21 @@ import { useState } from 'react';
 import { useWeb3 } from '@/context/Web3Context';
 import toast from 'react-hot-toast';
 import { ethers } from 'ethers';
+import { rewrapSymmetricKey } from '@/utils/crypto';
 
 // --- ICONS ---
 const ShareIcon = () => <svg className="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.186 2.25 2.25 0 00-3.933 2.186z" /></svg>;
 const CloseIcon = () => <svg className="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>;
 
 export default function AccessManager({ records, onClose }) {
-    const { contract } = useWeb3();
+    const { contract, keyPair } = useWeb3();
     const [granteeAddress, setGranteeAddress] = useState('');
     const [duration, setDuration] = useState(30);
     const [customDuration, setCustomDuration] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
     const isBulkShare = records.length > 1;
-    const finalDuration = duration === 'custom' ? Number(customDuration) : duration;
+    const finalDuration = duration === 'custom' ? Number(customDuration) : Number(duration);
 
     const handleGrantAccess = async (e) => {
         e.preventDefault();
@@ -24,8 +25,8 @@ export default function AccessManager({ records, onClose }) {
             toast.error("Please enter a valid Ethereum wallet address.");
             return;
         }
-        if (!records || records.length === 0 || !contract) {
-            toast.error("Record context is missing. Please try again.");
+        if (!records || records.length === 0 || !contract || !keyPair) {
+            toast.error("Required context (records, contract, or key pair) is missing. Please reconnect wallet and try again.");
             return;
         }
         if (duration === 'custom' && (!customDuration || Number(customDuration) <= 0)) {
@@ -33,37 +34,86 @@ export default function AccessManager({ records, onClose }) {
             return;
         }
 
-
         setIsLoading(true);
-        const toastId = toast.loading("Preparing to grant access on-chain...");
+        const toastId = toast.loading("Verifying professional and checking permissions...");
 
         try {
+            // --- PRE-FLIGHT CHECKS ---
             const professional = await contract.users(granteeAddress);
             if (professional.walletAddress === ethers.ZeroAddress || !professional.isVerified) {
                 throw new Error("This address does not belong to a verified professional.");
             }
-             if(Number(professional.role) === 0) { // Patient
-                 throw new Error("Cannot grant access to a patient.");
+            if (Number(professional.role) === 0) {
+                throw new Error("Cannot grant access to a patient.");
             }
+            if (!professional.publicKey) {
+                throw new Error("This professional has not set up their encryption key. They must log in to the application first.");
+            }
+
+            const now = Math.floor(Date.now() / 1000);
+            const accessChecks = records.map(r => contract.recordAccess(r.id, granteeAddress));
+            const accessTimestamps = await Promise.all(accessChecks);
+
+            const validRecordsToShare = records.filter((_, index) => Number(accessTimestamps[index]) <= now);
+
+            if (validRecordsToShare.length === 0) {
+                 throw new Error("Access has already been granted to this professional for all selected records.");
+            }
+            if (validRecordsToShare.length < records.length) {
+                toast.success(`Skipping ${records.length - validRecordsToShare.length} record(s) where access is already granted.`, { id: toastId });
+            }
+
+            // --- CRYPTOGRAPHIC & ON-CHAIN WORK ---
+            toast.loading("Fetching encrypted data and preparing secure keys...", { id: toastId });
+            
+            const professionalPublicKey = professional.publicKey;
+
+            const recordIdsToGrant = validRecordsToShare.map(r => r.id);
+            const encryptedDeks = await Promise.all(
+                validRecordsToShare.map(async (record) => {
+                    if (!record.metadata || !record.metadata.encryptedBundleIPFSHash) {
+                        throw new Error(`Critical error: Cannot find encrypted data location for record ${record.id}.`);
+                    }
+                    const response = await fetch(`https://ipfs.io/ipfs/${record.metadata.encryptedBundleIPFSHash}`);
+                    if (!response.ok) {
+                        throw new Error(`Failed to fetch encrypted data for record ${record.id} from IPFS.`);
+                    }
+                    const encryptedBundle = await response.json();
+                    
+                    const rewrappedDek = await rewrapSymmetricKey(
+                        encryptedBundle,
+                        keyPair.privateKey,
+                        professionalPublicKey
+                    );
+                    return rewrappedDek;
+                })
+            );
 
             toast.loading("Sending transaction to the blockchain...", { id: toastId });
-            
             let tx;
             if (isBulkShare) {
-                const recordIds = records.map(r => r.id);
-                tx = await contract.grantMultipleRecordAccess(recordIds, granteeAddress, finalDuration);
+                tx = await contract.grantMultipleRecordAccess(recordIdsToGrant, granteeAddress, finalDuration, encryptedDeks);
             } else {
-                tx = await contract.grantRecordAccess(records[0].id, granteeAddress, finalDuration);
+                tx = await contract.grantRecordAccess(recordIdsToGrant[0], granteeAddress, finalDuration, encryptedDeks[0]);
             }
-            
+
             await tx.wait();
 
-            toast.success(`Access granted for ${finalDuration} days!`, { id: toastId });
+            toast.success(`Access granted successfully for ${finalDuration} days!`, { id: toastId });
             onClose();
 
         } catch (error) {
             console.error("Failed to grant access:", error);
-            const errorMessage = error.reason || error.message || "An unexpected error occurred.";
+            let errorMessage = "An unexpected error occurred.";
+             if (error.reason) {
+                 if (error.reason.includes("AccessAlreadyGranted")) {
+                     errorMessage = "This professional already has active access to this record.";
+                 } else {
+                     errorMessage = error.reason;
+                 }
+             } else if (error.message) {
+                 errorMessage = error.message;
+             }
             toast.error(errorMessage, { id: toastId });
         } finally {
             setIsLoading(false);
@@ -87,7 +137,7 @@ export default function AccessManager({ records, onClose }) {
                     </div>
                     <div>
                         <h2 className="text-2xl font-bold text-slate-900">{isBulkShare ? `Share ${records.length} Records` : 'Share Record'}</h2>
-                        {!isBulkShare && (
+                        {!isBulkShare && records && records.length > 0 && (
                             <p className="text-slate-500 truncate" title={records[0].metadata?.description}>
                                 Sharing: "{records[0].metadata?.description || `Record ID: ${records[0].id}`}"
                             </p>
@@ -119,7 +169,7 @@ export default function AccessManager({ records, onClose }) {
                             <select
                                 id="duration"
                                 value={duration}
-                                onChange={(e) => setDuration(e.target.value === 'custom' ? 'custom' : Number(e.target.value))}
+                                onChange={(e) => setDuration(e.target.value)}
                                 className="w-full px-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500 bg-white"
                             >
                                 <option value={30}>30 Days</option>

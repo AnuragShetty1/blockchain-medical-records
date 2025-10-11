@@ -19,9 +19,10 @@ contract AccessControl is Roles {
     error NotAuthorized();
     error RecordNotFound();
     error NotRecordOwner();
+    error InputArrayLengthMismatch(); // For grantMultipleRecordAccess
 
     // --- EVENTS ---
-    event AccessGranted(uint256 indexed recordId, address indexed owner, address indexed grantee, uint256 expiration);
+    event AccessGranted(uint256 indexed recordId, address indexed owner, address indexed grantee, uint256 expiration, bytes encryptedDek);
     event AccessRevoked(uint256 indexed recordId, address indexed owner, address indexed grantee);
     event AccessRequested(uint256 indexed requestId, address indexed patient, address indexed provider, string claimId);
     event RequestApproved(uint256 indexed requestId, address indexed patient, uint256 accessDuration);
@@ -36,8 +37,9 @@ contract AccessControl is Roles {
     /**
      * @dev Grants a user timed access to a specific medical record.
      * Only the owner of the record (the patient) can grant access.
+     * @param _encryptedDek The encrypted data encryption key for the grantee.
      */
-    function grantRecordAccess(uint256 _recordId, address _grantee, uint256 _durationInDays) public {
+    function grantRecordAccess(uint256 _recordId, address _grantee, uint256 _durationInDays, bytes memory _encryptedDek) public {
         if (_recordId >= records.length) { revert RecordNotFound(); }
         Record storage recordToAccess = records[_recordId];
         if (recordToAccess.owner != msg.sender) { revert NotRecordOwner(); }
@@ -47,23 +49,28 @@ contract AccessControl is Roles {
             (grantee.role != Role.Doctor &&
             grantee.role != Role.LabTechnician &&
             grantee.role != Role.InsuranceProvider &&
-            grantee.role != Role.Pharmacist && // Added for completeness
+            grantee.role != Role.Pharmacist &&
             grantee.role != Role.Researcher) ||
             !grantee.isVerified
         ) { revert NotAVerifiedProfessional(); }
 
+        // --- Prevent re-granting active access ---
+        if (recordAccess[_recordId][_grantee] > block.timestamp) { revert AccessAlreadyGranted(); }
 
         uint256 expirationTime = block.timestamp + (_durationInDays * 1 days);
         recordAccess[_recordId][_grantee] = expirationTime;
 
-        emit AccessGranted(_recordId, msg.sender, _grantee, expirationTime);
+        emit AccessGranted(_recordId, msg.sender, _grantee, expirationTime, _encryptedDek);
     }
 
     /**
      * @dev [NEW] Grants a user timed access to multiple medical records in a single transaction.
      * Only the owner of the records (the patient) can grant access.
+     * @param _encryptedDeks An array of encrypted data encryption keys, one for each recordId.
      */
-    function grantMultipleRecordAccess(uint256[] memory _recordIds, address _grantee, uint256 _durationInDays) public {
+    function grantMultipleRecordAccess(uint256[] memory _recordIds, address _grantee, uint256 _durationInDays, bytes[] memory _encryptedDeks) public {
+        if (_recordIds.length != _encryptedDeks.length) { revert InputArrayLengthMismatch(); }
+
         User storage grantee = users[_grantee];
         if (
             (grantee.role != Role.Doctor &&
@@ -81,8 +88,14 @@ contract AccessControl is Roles {
             if (recordId < records.length) {
                 Record storage recordToAccess = records[recordId];
                 if (recordToAccess.owner == msg.sender) { // Check ownership for each record
-                    recordAccess[recordId][_grantee] = expirationTime;
-                    emit AccessGranted(recordId, msg.sender, _grantee, expirationTime);
+                    
+                    // --- Prevent re-granting active access for each record ---
+                    if (recordAccess[recordId][_grantee] <= block.timestamp) {
+                        recordAccess[recordId][_grantee] = expirationTime;
+                        emit AccessGranted(recordId, msg.sender, _grantee, expirationTime, _encryptedDeks[i]);
+                    }
+                    // If access is already granted and active, we simply skip this recordId
+                    // and do not emit an error, allowing the rest of the batch to proceed.
                 }
             }
         }
@@ -139,7 +152,9 @@ contract AccessControl is Roles {
                 for (uint j = 0; j < recordIds.length; j++) {
                     uint256 recordId = recordIds[j];
                     recordAccess[recordId][provider] = expirationTime;
-                    emit AccessGranted(recordId, msg.sender, provider, expirationTime);
+                    // Note: This legacy function does not support key re-wrapping.
+                    // Emitting with empty bytes for the encryptedDek.
+                    emit AccessGranted(recordId, msg.sender, provider, expirationTime, "");
                 }
 
                 found = true;
