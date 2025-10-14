@@ -141,6 +141,7 @@ const ReviewSection = () => {
             
             if (events.length === 0) {
                 setSharedRecords([]);
+                setIsLoading(false); // Set loading to false here
                 return;
             }
 
@@ -164,19 +165,8 @@ const ReviewSection = () => {
 
                 const patientProfile = await contract.userProfiles(owner);
 
-                // Helper to convert Uint8Array to Base64
-                const uint8ArrayToBase64 = (bytes) => {
-                    let binary = '';
-                    const len = bytes.byteLength;
-                    for (let i = 0; i < len; i++) {
-                        binary += String.fromCharCode(bytes[i]);
-                    }
-                    return window.btoa(binary);
-                };
-
                 return {
                     id: Number(record.id),
-                    // [FIX] Fallback to metadata's hash if the on-chain one is missing
                     encryptedDataCID: record.encryptedDataCID || metadata.encryptedBundleIPFSHash,
                     ipfsHash: record.ipfsHash,
                     timestamp: Number(record.timestamp),
@@ -186,8 +176,9 @@ const ReviewSection = () => {
                     category: record.category,
                     metadata: metadata,
                     accessUntil: Number(expiration),
-                    // [FIX] Correctly convert the hex bytes from the event to a Base64 string
-                    encryptedDekForViewer: uint8ArrayToBase64(ethers.getBytes(encryptedDek)),
+                    // [FIX] The 'encryptedDek' from the event is a hex string and should be used directly.
+                    // The conversion to Base64 was incorrect and caused the decryption to fail.
+                    encryptedDekForViewer: encryptedDek,
                 };
             });
             
@@ -219,7 +210,7 @@ const ReviewSection = () => {
 
     if (isLoading) {
         return (
-            <div className="flex justify-center items-center p-12 bg-white rounded-2xl shadow-lg border border-slate-200">
+            <div className="flex justify-center items-center p-12 bg-white rounded-2xl shadow-lg border-slate-200">
                 <Spinner />
                 <p className="ml-4 text-slate-500">Searching for records shared with you...</p>
             </div>
