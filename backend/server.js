@@ -11,7 +11,8 @@ const startIndexer = require('./src/indexer/indexer');
 
 // --- Import API Routes ---
 const superAdminRoutes = require('./src/api/routes/superAdmin');
-const userRoutes = require('./src/api/routes/users'); // 1. Import the new user routes
+const userRoutes = require('./src/api/routes/users');
+const hospitalAdminRoutes = require('./src/api/routes/hospitalAdmin'); // [NEW] Import hospital admin routes
 
 const app = express();
 
@@ -28,13 +29,12 @@ app.get('/', (req, res) => {
 
 // --- API Routes ---
 app.use('/api/super-admin', superAdminRoutes);
-app.use('/api/users', userRoutes); // 2. Use the new user routes
+app.use('/api/users', userRoutes);
+app.use('/api/hospital-admin', hospitalAdminRoutes); // [NEW] Use hospital admin routes
 
 // --- Global Error Handler ---
 app.use(errorHandler);
 
-// NOTE: The WebSocket server setup is from a previous, now-abandoned approach.
-// It can be cleaned up later but is harmless.
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
@@ -66,4 +66,3 @@ const startServer = async () => {
 };
 
 startServer();
-

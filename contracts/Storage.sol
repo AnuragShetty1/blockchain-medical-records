@@ -40,6 +40,9 @@ abstract contract Storage {
         address owner;
         bool isVerified;
         string category;
+        // [NEW] Fields for encrypted symmetric keys for the new encryption flow
+        bytes encryptedKeyForPatient;
+        bytes encryptedKeyForHospital;
     }
 
     // Defines the status of an access request.
@@ -86,9 +89,13 @@ abstract contract Storage {
     mapping(address => AccessRequest[]) public patientRequests;
     uint256 internal _nextRequestId;
 
-    // [NEW] Hospital and role management
+    // Hospital and role management
     mapping(uint256 => Hospital) public hospitals;
     uint256 public hospitalIdCounter;
     mapping(uint256 => RegistrationRequest) public registrationRequests;
     mapping(address => uint256) public userToHospital; // userAddress => hospitalId
+    
+    // [NEW] Mapping to link professionals directly to their hospital ID on-chain for the new affiliation workflow
+    mapping(address => uint256) public professionalToHospitalId;
 }
+

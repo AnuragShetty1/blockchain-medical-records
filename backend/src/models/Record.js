@@ -22,6 +22,13 @@ const recordSchema = new mongoose.Schema({
         required: true,
         lowercase: true,
     },
+    // [NEW] Store encrypted keys in the database
+    encryptedKeyForPatient: {
+        type: String, // Storing as hex string
+    },
+    encryptedKeyForHospital: {
+        type: String, // Storing as hex string
+    }
 }, { timestamps: true });
 
 const Record = mongoose.model('Record', recordSchema);

@@ -7,6 +7,7 @@ const MedicalRecordsABI = require(path.join(__dirname, '../../../src/contracts/M
 const Hospital = require('../models/Hospital');
 const RegistrationRequest = require('../models/RegistrationRequest');
 const User = require('../models/User');
+const Record = require('../models/Record'); // [NEW] Import Record model
 
 const startIndexer = (wss) => {
 
@@ -16,6 +17,8 @@ const startIndexer = (wss) => {
     const contract = new ethers.Contract(config.contractAddress, MedicalRecordsABI, provider);
 
     logger.info(`Indexer connected to contract at address: ${config.contractAddress}`);
+
+    // --- Hospital Management Events ---
 
     contract.on('RegistrationRequested', async (requestId, hospitalName, requesterAddress, event) => {
         try {
@@ -54,7 +57,6 @@ const startIndexer = (wss) => {
             const hospitalName = updatedRequest.hospitalName;
             logger.info(`[Indexer] SUCCESS: Finalized request ID ${numericHospitalId} as 'approved'.`);
 
-            // When a hospital is verified, its status is 'active' by default from the schema.
             await Hospital.findOneAndUpdate(
                 { hospitalId: numericHospitalId }, 
                 { 
@@ -62,20 +64,21 @@ const startIndexer = (wss) => {
                     name: hospitalName,
                     adminAddress, 
                     isVerified: true,
-                    status: 'active' // Explicitly set to active
+                    status: 'active'
                 }, 
                 { upsert: true, new: true }
             );
             logger.info(`[Indexer] Saved/Updated hospital: ${hospitalName}`);
             
             await User.findOneAndUpdate(
-                { walletAddress: adminAddress.toLowerCase() }, 
+                { address: adminAddress.toLowerCase() }, 
                 { 
-                    walletAddress: adminAddress.toLowerCase(), 
+                    address: adminAddress.toLowerCase(), 
                     name: `Admin for ${hospitalName}`,
-                    role: 2, // HospitalAdmin
+                    role: 'HospitalAdmin',
+                    professionalStatus: 'approved',
+                    isVerified: true,
                     hospitalId: numericHospitalId,
-                    isVerified: true 
                 }, 
                 { upsert: true, new: true }
             );
@@ -87,7 +90,6 @@ const startIndexer = (wss) => {
         }
     });
     
-    // --- [NEW] Event Listener for Hospital Revocation ---
     contract.on('HospitalRevoked', async (hospitalId, event) => {
         const numericHospitalId = Number(hospitalId);
         try {
@@ -95,32 +97,43 @@ const startIndexer = (wss) => {
 
             const revokedHospital = await Hospital.findOneAndUpdate(
                 { hospitalId: numericHospitalId, status: 'revoking' },
-                { $set: { status: 'revoked', isVerified: false } }, // Set final status
+                { $set: { status: 'revoked', isVerified: false } },
                 { new: true }
             );
 
             if (!revokedHospital) {
-                logger.warn(`[Indexer] Did not find a REVOKING hospital for ID ${numericHospitalId}. The event might be a duplicate or the API pre-processing failed.`);
+                logger.warn(`[Indexer] Did not find a REVOKING hospital for ID ${numericHospitalId}. This could be a duplicate event or an API pre-processing failure.`);
                 return;
             }
             
             logger.info(`[Indexer] SUCCESS: Finalized hospital ID ${numericHospitalId} as 'revoked'.`);
-
-            // Optional: You could also find all users associated with this hospitalId
-            // and update their roles or statuses here. For now, we leave them as-is.
 
         } catch (error) {
             logger.error(`Error processing HospitalRevoked event for ID ${numericHospitalId}: ${error.message}`);
         }
     });
 
-    // Unchanged RoleAssigned and RoleRevoked listeners...
+    // --- Role Management Events ---
+
     contract.on('RoleAssigned', async (userAddress, role, hospitalId, event) => {
         try {
-            const roleMap = { 0: "Patient", 1: "Doctor", 2: "Admin", 3: "Insurance" };
-            const roleName = roleMap[Number(role)] || 'Unassigned';
+            const roleEnumToString = { 1: "Doctor", 2: "LabTechnician" };
+            const roleName = roleEnumToString[Number(role)] || 'Unassigned Professional';
             logger.info(`[Event] RoleAssigned: ${roleName} to ${userAddress} for Hospital ID ${hospitalId}`);
-            await User.findOneAndUpdate( { walletAddress: userAddress.toLowerCase() }, { $set: { role: Number(role), hospitalId: Number(hospitalId), isVerified: true, } }, { new: true } );
+            
+            await User.findOneAndUpdate(
+                { address: userAddress.toLowerCase() },
+                { 
+                    $set: { 
+                        role: roleName, 
+                        hospitalId: Number(hospitalId),
+                        professionalStatus: 'approved',
+                        isVerified: true, 
+                    } 
+                },
+                { new: true }
+            );
+            logger.info(`[Indexer] User ${userAddress} status updated to 'approved'.`);
         } catch (error) {
             logger.error(`Error processing RoleAssigned event: ${error.message}`);
         }
@@ -128,12 +141,50 @@ const startIndexer = (wss) => {
 
     contract.on('RoleRevoked', async (userAddress, role, hospitalId, event) => {
         try {
-            const roleMap = { 0: "Patient", 1: "Doctor", 2: "Admin", 3: "Insurance" };
-            const roleName = roleMap[Number(role)] || 'Unassigned';
-            logger.info(`[Event] RoleRevoked: ${roleName} from ${userAddress}`);
-            await User.findOneAndUpdate( { walletAddress: userAddress.toLowerCase() }, {  $set: { role: 0 }, $unset: { hospitalId: "" } },  { new: true } );
+            logger.info(`[Event] RoleRevoked from ${userAddress}`);
+            await User.findOneAndUpdate(
+                { address: userAddress.toLowerCase() },
+                { 
+                    $set: { 
+                        role: 'Patient', // Revert to base role
+                        professionalStatus: 'revoked',
+                        isVerified: false,
+                    },
+                    $unset: { 
+                        hospitalId: "",
+                        requestedHospitalId: ""
+                    }
+                }, 
+                { new: true }
+            );
+             logger.info(`[Indexer] User ${userAddress} status updated to 'revoked'.`);
         } catch (error) {
             logger.error(`Error processing RoleRevoked event: ${error.message}`);
+        }
+    });
+
+    // --- [NEW] Record Management Event ---
+    
+    contract.on('RecordAdded', async (recordId, patient, uploadedBy, category, isVerified, encryptedKeyForPatient, encryptedKeyForHospital, event) => {
+        try {
+            const numericRecordId = Number(recordId);
+            logger.info(`[Event] RecordAdded: ID ${numericRecordId} for patient ${patient}`);
+
+            await Record.findOneAndUpdate(
+                { recordId: numericRecordId },
+                {
+                    recordId: numericRecordId,
+                    patientAddress: patient.toLowerCase(),
+                    uploadedBy: uploadedBy.toLowerCase(),
+                    // ipfsHash is added via a separate API call before the transaction, so we don't upsert it here.
+                    encryptedKeyForPatient: encryptedKeyForPatient,
+                    encryptedKeyForHospital: encryptedKeyForHospital
+                },
+                { upsert: true, new: true }
+            );
+            logger.info(`[Indexer] Saved record metadata for ID ${numericRecordId}.`);
+        } catch(error) {
+            logger.error(`Error processing RecordAdded event: ${error.message}`);
         }
     });
     
@@ -141,4 +192,3 @@ const startIndexer = (wss) => {
 };
 
 module.exports = startIndexer;
-

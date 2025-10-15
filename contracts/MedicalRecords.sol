@@ -36,24 +36,51 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
     {}
 
     // --- EVENTS ---
-    event RecordAdded(uint256 indexed recordId, address indexed patient, address indexed uploadedBy, string category, bool isVerified);
+    event RecordAdded(
+        uint256 indexed recordId,
+        address indexed patient,
+        address indexed uploadedBy,
+        string category,
+        bool isVerified,
+        bytes encryptedKeyForPatient,
+        bytes encryptedKeyForHospital
+    );
+
 
     // --- FUNCTIONS ---
 
     /**
      * @dev Allows a patient to add a self-uploaded, non-verified medical record.
+     * For self-uploads, both encrypted keys are intended for the patient.
      */
-    function addSelfUploadedRecord(string memory _ipfsHash, string memory _category) public {
+    function addSelfUploadedRecord(
+        string memory _ipfsHash,
+        string memory _category,
+        bytes memory _encryptedKeyForPatient
+    ) public {
         if (users[msg.sender].role != Role.Patient) { revert NotAPatient(); }
         
-        _createRecord(msg.sender, _ipfsHash, _category, false);
+        _createRecord(
+            msg.sender,
+            _ipfsHash,
+            _category,
+            false,
+            _encryptedKeyForPatient,
+            _encryptedKeyForPatient // For self-upload, hospital key is just a copy for the patient
+        );
     }
 
     /**
      * @dev Allows a verified professional (Doctor, LabTechnician) to add a verified record
-     * on behalf of a patient.
+     * on behalf of a patient, including separate encrypted keys for patient and hospital.
      */
-    function addVerifiedRecord(address _patient, string memory _ipfsHash, string memory _category) public {
+    function addVerifiedRecord(
+        address _patient,
+        string memory _ipfsHash,
+        string memory _category,
+        bytes memory _encryptedKeyForPatient,
+        bytes memory _encryptedKeyForHospital
+    ) public {
         if (users[_patient].walletAddress == address(0)) { revert UserNotFound(); }
         if (users[_patient].role != Role.Patient) { revert NotAPatient(); }
 
@@ -65,14 +92,28 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
             revert NotAVerifiedProfessional();
         }
 
-        _createRecord(_patient, _ipfsHash, _category, true);
+        _createRecord(
+            _patient,
+            _ipfsHash,
+            _category,
+            true,
+            _encryptedKeyForPatient,
+            _encryptedKeyForHospital
+        );
     }
 
     /**
      * @dev Internal function to handle the creation and storage of a new record.
      * Grants permanent access to both the owner (patient) and the uploader.
      */
-    function _createRecord(address _patient, string memory _ipfsHash, string memory _category, bool _isVerified) private {
+    function _createRecord(
+        address _patient,
+        string memory _ipfsHash,
+        string memory _category,
+        bool _isVerified,
+        bytes memory _encryptedKeyForPatient,
+        bytes memory _encryptedKeyForHospital
+    ) private {
         uint256 recordId = records.length;
         
         records.push(Record({
@@ -82,7 +123,9 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
             uploadedBy: msg.sender,
             owner: _patient,
             isVerified: _isVerified,
-            category: _category
+            category: _category,
+            encryptedKeyForPatient: _encryptedKeyForPatient,
+            encryptedKeyForHospital: _encryptedKeyForHospital
         }));
 
         patientRecordIds[_patient].push(recordId);
@@ -91,16 +134,11 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
         recordAccess[recordId][_patient] = type(uint256).max;
         recordAccess[recordId][msg.sender] = type(uint256).max;
 
-        emit RecordAdded(recordId, _patient, msg.sender, _category, _isVerified);
+        emit RecordAdded(recordId, _patient, msg.sender, _category, _isVerified, _encryptedKeyForPatient, _encryptedKeyForHospital);
     }
 
     // --- VIEW FUNCTIONS ---
 
-    /**
-     * @dev Retrieves the array of record IDs for a given patient.
-     * Only the patient themselves can view their full list of record IDs.
-     * Other users must be granted access to specific records to view them.
-     */
     function getPatientRecordIds(address _patientAddress) public view returns (uint256[] memory) {
         if (msg.sender != _patientAddress) {
             revert NotAuthorized();
@@ -108,10 +146,6 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
         return patientRecordIds[_patientAddress];
     }
 
-    /**
-     * @dev Retrieves a single record by its ID.
-     * This function requires the caller to have access to the record.
-     */
     function getRecordById(uint256 _recordId) public view returns (Record memory) {
         if (!checkRecordAccess(_recordId, msg.sender)) {
             revert NotAuthorized();
@@ -119,3 +153,4 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
         return records[_recordId];
     }
 }
+
