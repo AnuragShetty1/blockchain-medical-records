@@ -12,8 +12,6 @@ const logger = require('../../utils/logger');
  */
 router.get('/requests', async (req, res, next) => {
     try {
-        // --- [CHANGE] ---
-        // Fetch requests that are either 'pending' or 'verifying'.
         const pendingRequests = await RegistrationRequest.find({ 
             status: { $in: ['pending', 'verifying'] } 
         }).sort({ createdAt: -1 });
@@ -26,12 +24,16 @@ router.get('/requests', async (req, res, next) => {
 
 /**
  * @route   GET /api/super-admin/hospitals
- * @desc    Fetch all verified hospitals
+ * @desc    Fetch all ACTIVE and REVOKING hospitals
  * @access  Public (for now)
  */
 router.get('/hospitals', async (req, res, next) => {
     try {
-        const verifiedHospitals = await Hospital.find({ isVerified: true }).sort({ createdAt: -1 });
+        // --- [CHANGE] ---
+        // Now fetches based on the new 'status' field to support the revocation flow.
+        const verifiedHospitals = await Hospital.find({ 
+            status: { $in: ['active', 'revoking'] } 
+        }).sort({ createdAt: -1 });
         res.json({ success: true, data: verifiedHospitals });
     } catch (error) {
         logger.error('Error fetching verified hospitals:', error);
@@ -55,36 +57,28 @@ router.post('/verify-hospital', async (req, res, next) => {
     try {
         logger.info(`Verification process started for request ID: ${numericRequestId}`);
 
-        // --- [CRITICAL CHANGE] ---
-        // Step 1: Immediately and atomically set the status to 'verifying' in the database.
         const request = await RegistrationRequest.findOneAndUpdate(
             { requestId: numericRequestId, status: 'pending' },
             { $set: { status: 'verifying' } },
             { new: true }
         );
 
-        // If no request was found/updated, it means it wasn't in a 'pending' state.
         if (!request) {
             logger.warn(`Request ID ${numericRequestId} is not in a pending state. It may already be processing.`);
             return res.status(409).json({ success: false, message: 'Request is not pending or has already been processed.' });
         }
 
-        // Step 2: Send the transaction to the blockchain.
         const tx = await ethersService.verifyHospital(numericRequestId, adminAddress);
         logger.info(`Transaction sent. Hash: ${tx.hash}. Waiting for confirmation...`);
 
-        // Step 3: Wait for the transaction to be mined.
         const receipt = await tx.wait(1);
         logger.info(`Transaction confirmed in block: ${receipt.blockNumber}. The indexer will now handle the final 'approved' status.`);
 
-        // Step 4: Send a definitive success message. The frontend will see the final state via polling.
         res.json({ success: true, message: 'Hospital verification transaction was successfully confirmed on-chain.' });
 
     } catch (error) {
         logger.error(`On-chain verification failed for request ID ${numericRequestId}:`, error);
         
-        // --- [SAFETY NET] ---
-        // If the transaction fails, set the status to 'failed' for auditing.
         await RegistrationRequest.findOneAndUpdate(
             { requestId: numericRequestId },
             { $set: { status: 'failed' } }
@@ -95,5 +89,55 @@ router.post('/verify-hospital', async (req, res, next) => {
     }
 });
 
+// --- [NEW] Revoke Hospital Endpoint ---
+/**
+ * @route   POST /api/super-admin/revoke-hospital
+ * @desc    Marks a hospital as 'revoking', sends the transaction, and waits for confirmation.
+ * @access  Public (for now)
+ */
+router.post('/revoke-hospital', async (req, res, next) => {
+    const { hospitalId } = req.body;
+    const numericHospitalId = Number(hospitalId);
+
+    if (hospitalId === undefined) {
+        return res.status(400).json({ success: false, message: 'A valid Hospital ID is required.' });
+    }
+
+    try {
+        logger.info(`Revocation process started for hospital ID: ${numericHospitalId}`);
+
+        const hospital = await Hospital.findOneAndUpdate(
+            { hospitalId: numericHospitalId, status: 'active' },
+            { $set: { status: 'revoking' } },
+            { new: true }
+        );
+
+        if (!hospital) {
+            logger.warn(`Hospital ID ${numericHospitalId} is not in an active state.`);
+            return res.status(409).json({ success: false, message: 'Hospital is not active or has already been revoked.' });
+        }
+
+        const tx = await ethersService.revokeHospital(numericHospitalId);
+        logger.info(`Transaction sent. Hash: ${tx.hash}. Waiting for confirmation...`);
+
+        await tx.wait(1);
+        logger.info(`Transaction confirmed. The indexer will now handle the final 'revoked' status.`);
+
+        res.json({ success: true, message: 'Hospital revocation transaction was successfully confirmed on-chain.' });
+
+    } catch (error) {
+        logger.error(`On-chain revocation failed for hospital ID ${numericHospitalId}:`, error);
+
+        // Safety Net: If the transaction fails, revert the status back to 'active'.
+        await Hospital.findOneAndUpdate(
+            { hospitalId: numericHospitalId },
+            { $set: { status: 'active' } }
+        );
+
+        const reason = error.reason || 'An error occurred during the blockchain transaction.';
+        res.status(500).json({ success: false, message: reason });
+    }
+});
 
 module.exports = router;
+

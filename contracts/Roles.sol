@@ -24,6 +24,7 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
     error UserAlreadyInHospital();
     error UserNotInHospital();
     error NotAuthorized();
+    error HospitalNotVerified(); // New error for revocation logic
 
     // --- EVENTS ---
     event UserRegistered(address indexed userAddress, string name, Role role);
@@ -32,6 +33,7 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
     event PublicKeySaved(address indexed user);
     event RegistrationRequested(uint256 indexed hospitalId, string name, address indexed requester);
     event HospitalVerified(uint256 indexed hospitalId, address indexed adminAddress);
+    event HospitalRevoked(uint256 indexed hospitalId); // New event for revocation
     event RoleAssigned(address indexed user, Role role, uint256 indexed hospitalId);
     event RoleRevoked(address indexed user, Role role, uint256 indexed hospitalId);
 
@@ -42,10 +44,8 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
 
     // --- FUNCTIONS ---
 
-    /**
-     * @dev Registers a new user with a specified name and role.
-     * Cannot register as an Admin directly.
-     */
+    // [UNCHANGED] registerUser, savePublicKey, updateUserProfile
+
     function registerUser(string memory _name, Role _role) public {
         if (users[msg.sender].walletAddress != address(0)) { revert AlreadyRegistered(); }
         if (_role == Role.HospitalAdmin || _role == Role.SuperAdmin) { revert CannotRegisterAsAdmin(); }
@@ -67,9 +67,6 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
         emit UserRegistered(msg.sender, _name, _role);
     }
 
-    /**
-     * @dev Allows a user to save their public encryption key on-chain.
-     */
     function savePublicKey(string memory _publicKey) public {
         if (users[msg.sender].walletAddress == address(0)) { revert NotRegistered(); }
         if (bytes(users[msg.sender].publicKey).length > 0) { revert PublicKeyAlreadySet(); }
@@ -78,9 +75,6 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
         emit PublicKeySaved(msg.sender);
     }
 
-    /**
-     * @dev Allows a registered user to update their profile information.
-     */
     function updateUserProfile(string calldata _name, string calldata _contactInfo, string calldata _profileMetadataURI) public {
         if (users[msg.sender].walletAddress == address(0)) { revert NotRegistered(); }
 
@@ -92,11 +86,11 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
         emit ProfileUpdated(msg.sender, _name, _contactInfo, _profileMetadataURI);
     }
 
+
     // --- Hospital Management Functions ---
 
-    /**
-     * @dev Allows anyone to request registration for a new hospital.
-     */
+    // [UNCHANGED] requestRegistration, verifyHospital
+
     function requestRegistration(string memory hospitalName) public {
         uint256 id = hospitalIdCounter++;
         registrationRequests[id] = RegistrationRequest({
@@ -108,9 +102,6 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
         emit RegistrationRequested(id, hospitalName, msg.sender);
     }
 
-    /**
-     * @dev Allows the Super Admin (owner) to verify a hospital registration request.
-     */
     function verifyHospital(uint256 hospitalId, address adminAddress) public onlyOwner {
         if (registrationRequests[hospitalId].status != RequestStatus.Pending) {
             revert RequestNotFoundOrAlreadyHandled();
@@ -140,9 +131,22 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
         emit UserRegistered(adminAddress, "Admin", Role.HospitalAdmin);
     }
 
+
+    // --- [NEW] Hospital Revocation Function ---
     /**
-     * @dev Allows a Hospital Admin to assign roles within their hospital.
+     * @dev Allows the Super Admin (owner) to revoke a verified hospital.
      */
+    function revokeHospital(uint256 hospitalId) public onlyOwner {
+        if (!hospitals[hospitalId].isVerified) {
+            revert HospitalNotVerified();
+        }
+
+        hospitals[hospitalId].isVerified = false;
+        emit HospitalRevoked(hospitalId);
+    }
+
+    // [UNCHANGED] assignRole, revokeRole
+
     function assignRole(address user, Role role, uint256 hospitalId) public {
         if (users[msg.sender].role != Role.HospitalAdmin || !users[msg.sender].isVerified) { revert NotHospitalAdmin(); }
         if (userToHospital[msg.sender] != hospitalId) { revert NotAuthorized(); }
@@ -158,9 +162,6 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
         emit UserVerified(msg.sender, user);
     }
 
-    /**
-     * @dev Allows a Hospital Admin to revoke roles within their hospital.
-     */
     function revokeRole(address user, Role role, uint256 hospitalId) public {
         if (users[msg.sender].role != Role.HospitalAdmin || !users[msg.sender].isVerified) { revert NotHospitalAdmin(); }
         if (userToHospital[msg.sender] != hospitalId) { revert NotAuthorized(); }
@@ -173,6 +174,5 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
 
         emit RoleRevoked(user, role, hospitalId);
     }
-}
 
- 
+}

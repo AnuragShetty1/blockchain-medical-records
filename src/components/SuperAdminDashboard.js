@@ -2,9 +2,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
-// A small, dedicated component for the spinner to keep the main component clean.
-const Spinner = () => (
-    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+const Spinner = ({ color = 'white' }) => (
+    <svg className={`animate-spin -ml-1 mr-3 h-5 w-5 text-${color}`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
     </svg>
@@ -24,7 +23,7 @@ export default function SuperAdminDashboard() {
             const hospitalsResponse = await axios.get(`${API_URL}/hospitals`);
             setPendingRequests(requestsResponse.data.data || []);
             setVerifiedHospitals(hospitalsResponse.data.data || []);
-            setError(''); // Clear previous errors on a successful fetch
+            setError('');
         } catch (err) {
             console.error("Error fetching data:", err);
             setError(err.response?.data?.message || 'Failed to fetch data. The server might be down.');
@@ -35,37 +34,42 @@ export default function SuperAdminDashboard() {
         }
     }, [isLoading]);
 
-    // --- [DEFINITIVE FIX] ---
-    // Implements robust, intelligent polling for automatic updates.
     useEffect(() => {
-        // Fetch data immediately on component mount.
         fetchRequestsAndHospitals();
-
-        // Then, set up an interval to poll for new data every 5 seconds.
         const intervalId = setInterval(fetchRequestsAndHospitals, 5000);
-
-        // This cleanup function is crucial: it stops the polling when the component unmounts.
         return () => clearInterval(intervalId);
     }, [fetchRequestsAndHospitals]);
 
 
     const handleVerify = async (requestId, adminAddress) => {
         setError('');
-        // NOTE: We no longer set a "verifyingId" here. The UI will update
-        // automatically via polling once the backend sets the "verifying" status.
         try {
             const response = await axios.post(`${API_URL}/verify-hospital`, {
                 requestId,
                 adminAddress
             });
-            // The API call is fire-and-forget from the frontend's perspective.
-            // The polling will handle reflecting the final state change.
             if (!response.data.success) {
                throw new Error(response.data.message || 'Verification failed.');
             }
         } catch (err) {
             console.error("Error verifying hospital:", err);
             setError(err.response?.data?.message || 'A critical error occurred during verification.');
+        }
+    };
+
+    // --- [NEW] Handle Revocation ---
+    const handleRevoke = async (hospitalId) => {
+        setError('');
+        try {
+            const response = await axios.post(`${API_URL}/revoke-hospital`, {
+                hospitalId
+            });
+            if (!response.data.success) {
+                throw new Error(response.data.message || 'Revocation failed.');
+            }
+        } catch (err) {
+            console.error("Error revoking hospital:", err);
+            setError(err.response?.data?.message || 'A critical error occurred during revocation.');
         }
     };
 
@@ -116,10 +120,23 @@ export default function SuperAdminDashboard() {
                     {verifiedHospitals.length > 0 ? (
                         <div className="space-y-4">
                             {verifiedHospitals.map((hospital) => (
-                                <div key={hospital.hospitalId} className="bg-white p-4 rounded-lg shadow-sm border border-green-200">
-                                    <h3 className="text-lg font-bold text-green-800">{hospital.name}</h3>
+                                <div key={hospital.hospitalId} className={`bg-white p-4 rounded-lg shadow-sm border ${hospital.status === 'revoking' ? 'border-red-300' : 'border-green-200'}`}>
+                                    <h3 className={`text-lg font-bold ${hospital.status === 'revoking' ? 'text-red-800' : 'text-green-800'}`}>{hospital.name}</h3>
                                     <p className="text-sm text-slate-500 mt-1">Hospital ID: {hospital.hospitalId}</p>
                                     <p className="text-sm text-slate-500 break-words">Admin: {hospital.adminAddress}</p>
+                                    {/* --- [NEW] Revoke Button --- */}
+                                    <button
+                                        onClick={() => handleRevoke(hospital.hospitalId)}
+                                        disabled={hospital.status === 'revoking'}
+                                        className="mt-4 w-full flex items-center justify-center bg-red-500 text-white font-bold py-2 px-4 rounded-md hover:bg-red-600 focus:outline-none transition-colors disabled:bg-red-300 disabled:cursor-not-allowed"
+                                    >
+                                        {hospital.status === 'revoking' ? (
+                                            <>
+                                                <Spinner />
+                                                Revoking on Blockchain...
+                                            </>
+                                        ) : 'Revoke Hospital'}
+                                    </button>
                                 </div>
                             ))}
                         </div>

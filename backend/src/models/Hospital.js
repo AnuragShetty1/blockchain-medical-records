@@ -21,6 +21,13 @@ const hospitalSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
     },
+    // --- [NEW] ---
+    // This status field will be the source of truth for the UI and our API.
+    status: {
+        type: String,
+        enum: ['active', 'revoking', 'revoked'],
+        default: 'active',
+    },
 }, { timestamps: true });
 
 const Hospital = mongoose.model('Hospital', hospitalSchema);
