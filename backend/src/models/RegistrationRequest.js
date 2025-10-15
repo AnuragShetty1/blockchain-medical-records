@@ -16,9 +16,11 @@ const registrationRequestSchema = new mongoose.Schema({
         required: true,
         lowercase: true,
     },
+    // --- [CHANGE] ---
+    // Added 'verifying' and 'failed' to the enum to track in-progress transactions.
     status: {
         type: String,
-        enum: ['pending', 'approved', 'rejected'],
+        enum: ['pending', 'verifying', 'approved', 'failed'],
         default: 'pending',
     },
 }, { timestamps: true });

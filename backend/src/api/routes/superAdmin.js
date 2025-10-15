@@ -7,12 +7,16 @@ const logger = require('../../utils/logger');
 
 /**
  * @route   GET /api/super-admin/requests
- * @desc    Fetch all pending hospital registration requests
- * @access  Public (for now, will be protected later)
+ * @desc    Fetch all pending and in-progress hospital registration requests
+ * @access  Public (for now)
  */
 router.get('/requests', async (req, res, next) => {
     try {
-        const pendingRequests = await RegistrationRequest.find({ status: 'pending' }).sort({ createdAt: -1 });
+        // --- [CHANGE] ---
+        // Fetch requests that are either 'pending' or 'verifying'.
+        const pendingRequests = await RegistrationRequest.find({ 
+            status: { $in: ['pending', 'verifying'] } 
+        }).sort({ createdAt: -1 });
         res.json({ success: true, data: pendingRequests });
     } catch (error) {
         logger.error('Error fetching pending requests:', error);
@@ -23,7 +27,7 @@ router.get('/requests', async (req, res, next) => {
 /**
  * @route   GET /api/super-admin/hospitals
  * @desc    Fetch all verified hospitals
- * @access  Public (for now, will be protected later)
+ * @access  Public (for now)
  */
 router.get('/hospitals', async (req, res, next) => {
     try {
@@ -37,38 +41,55 @@ router.get('/hospitals', async (req, res, next) => {
 
 /**
  * @route   POST /api/super-admin/verify-hospital
- * @desc    Approve a request and wait for on-chain confirmation before responding.
+ * @desc    Marks a request as 'verifying', sends the transaction, and waits for confirmation.
  * @access  Public (for now)
  */
 router.post('/verify-hospital', async (req, res, next) => {
     const { requestId, adminAddress } = req.body;
+    const numericRequestId = Number(requestId);
 
-    if (requestId === undefined || requestId === null || !adminAddress) {
+    if (requestId === undefined || !adminAddress) {
         return res.status(400).json({ success: false, message: 'A valid Request ID and Admin Address are required.' });
     }
 
     try {
-        logger.info(`Verification process started for request ID: ${requestId}`);
+        logger.info(`Verification process started for request ID: ${numericRequestId}`);
 
-        // Step 1: Send the transaction to the blockchain
-        const tx = await ethersService.verifyHospital(requestId, adminAddress);
+        // --- [CRITICAL CHANGE] ---
+        // Step 1: Immediately and atomically set the status to 'verifying' in the database.
+        const request = await RegistrationRequest.findOneAndUpdate(
+            { requestId: numericRequestId, status: 'pending' },
+            { $set: { status: 'verifying' } },
+            { new: true }
+        );
+
+        // If no request was found/updated, it means it wasn't in a 'pending' state.
+        if (!request) {
+            logger.warn(`Request ID ${numericRequestId} is not in a pending state. It may already be processing.`);
+            return res.status(409).json({ success: false, message: 'Request is not pending or has already been processed.' });
+        }
+
+        // Step 2: Send the transaction to the blockchain.
+        const tx = await ethersService.verifyHospital(numericRequestId, adminAddress);
         logger.info(`Transaction sent. Hash: ${tx.hash}. Waiting for confirmation...`);
 
-        // --- THE KEY CHANGE: WAIT FOR CONFIRMATION ---
-        // Step 2: Wait for the transaction to be mined (1 confirmation).
-        // This makes the API call synchronous and guarantees the event has been emitted.
+        // Step 3: Wait for the transaction to be mined.
         const receipt = await tx.wait(1);
-        
-        logger.info(`Transaction confirmed in block: ${receipt.blockNumber}.`);
-        
-        // A brief pause to ensure the indexer, which runs in parallel, has time to complete its database write.
-        await new Promise(resolve => setTimeout(resolve, 1500)); // 1.5-second safety delay
+        logger.info(`Transaction confirmed in block: ${receipt.blockNumber}. The indexer will now handle the final 'approved' status.`);
 
-        // Step 3: Send a definitive success message.
-        res.json({ success: true, message: 'Hospital successfully verified on-chain.' });
+        // Step 4: Send a definitive success message. The frontend will see the final state via polling.
+        res.json({ success: true, message: 'Hospital verification transaction was successfully confirmed on-chain.' });
 
     } catch (error) {
-        logger.error(`On-chain verification failed for request ID ${requestId}:`, error);
+        logger.error(`On-chain verification failed for request ID ${numericRequestId}:`, error);
+        
+        // --- [SAFETY NET] ---
+        // If the transaction fails, set the status to 'failed' for auditing.
+        await RegistrationRequest.findOneAndUpdate(
+            { requestId: numericRequestId },
+            { $set: { status: 'failed' } }
+        );
+
         const reason = error.reason || 'An error occurred during the blockchain transaction.';
         res.status(500).json({ success: false, message: reason });
     }
@@ -76,4 +97,3 @@ router.post('/verify-hospital', async (req, res, next) => {
 
 
 module.exports = router;
-

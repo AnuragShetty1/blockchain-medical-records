@@ -2,62 +2,74 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
+// A small, dedicated component for the spinner to keep the main component clean.
+const Spinner = () => (
+    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    </svg>
+);
+
 export default function SuperAdminDashboard() {
     const [pendingRequests, setPendingRequests] = useState([]);
     const [verifiedHospitals, setVerifiedHospitals] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
-    const [verifyingId, setVerifyingId] = useState(null); // Tracks the ID of the request being verified
 
     const API_URL = 'http://localhost:3001/api/super-admin';
 
     const fetchRequestsAndHospitals = useCallback(async () => {
-        setIsLoading(true);
         try {
             const requestsResponse = await axios.get(`${API_URL}/requests`);
             const hospitalsResponse = await axios.get(`${API_URL}/hospitals`);
             setPendingRequests(requestsResponse.data.data || []);
             setVerifiedHospitals(hospitalsResponse.data.data || []);
+            setError(''); // Clear previous errors on a successful fetch
         } catch (err) {
             console.error("Error fetching data:", err);
-            setError(err.message || 'Failed to fetch data.');
+            setError(err.response?.data?.message || 'Failed to fetch data. The server might be down.');
         } finally {
-            setIsLoading(false);
+            if (isLoading) {
+                setIsLoading(false);
+            }
         }
-    }, []);
+    }, [isLoading]);
 
+    // --- [DEFINITIVE FIX] ---
+    // Implements robust, intelligent polling for automatic updates.
     useEffect(() => {
+        // Fetch data immediately on component mount.
         fetchRequestsAndHospitals();
+
+        // Then, set up an interval to poll for new data every 5 seconds.
+        const intervalId = setInterval(fetchRequestsAndHospitals, 5000);
+
+        // This cleanup function is crucial: it stops the polling when the component unmounts.
+        return () => clearInterval(intervalId);
     }, [fetchRequestsAndHospitals]);
 
-    // --- NEW, SIMPLIFIED & ROBUST VERIFICATION FLOW ---
-    const handleVerify = async (requestId, adminAddress) => {
-        setVerifyingId(requestId); // 1. Set loading state for this specific item
-        setError('');
 
+    const handleVerify = async (requestId, adminAddress) => {
+        setError('');
+        // NOTE: We no longer set a "verifyingId" here. The UI will update
+        // automatically via polling once the backend sets the "verifying" status.
         try {
-            // 2. Call the API, which now waits for blockchain confirmation
             const response = await axios.post(`${API_URL}/verify-hospital`, {
                 requestId,
                 adminAddress
             });
-
-            if (response.data.success) {
-                // 3. On success, we know the database is updated. Fetch the new source of truth.
-                await fetchRequestsAndHospitals();
-            } else {
-                throw new Error(response.data.message || 'Verification failed.');
+            // The API call is fire-and-forget from the frontend's perspective.
+            // The polling will handle reflecting the final state change.
+            if (!response.data.success) {
+               throw new Error(response.data.message || 'Verification failed.');
             }
-
         } catch (err) {
             console.error("Error verifying hospital:", err);
             setError(err.response?.data?.message || 'A critical error occurred during verification.');
-        } finally {
-            setVerifyingId(null); // 4. Clear the loading state
         }
     };
 
-    if (isLoading && !verifyingId) {
+    if (isLoading) {
         return <div className="text-center p-8">Loading dashboard...</div>;
     }
 
@@ -68,22 +80,27 @@ export default function SuperAdminDashboard() {
             {error && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">{error}</div>}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Pending Requests Column */}
+                {/* Pending & Verifying Requests Column */}
                 <div>
                     <h2 className="text-2xl font-semibold text-slate-700 mb-4 border-b pb-2">Pending Hospital Requests</h2>
                     {pendingRequests.length > 0 ? (
                         <div className="space-y-4">
                             {pendingRequests.map((req) => (
-                                <div key={req.requestId} className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
+                                <div key={req.requestId} className={`bg-white p-4 rounded-lg shadow-sm border ${req.status === 'verifying' ? 'border-blue-300' : 'border-slate-200'}`}>
                                     <h3 className="text-lg font-bold text-slate-800">{req.hospitalName}</h3>
                                     <p className="text-sm text-slate-500 mt-1">Request ID: {req.requestId}</p>
                                     <p className="text-sm text-slate-500 break-words">Admin: {req.requesterAddress}</p>
                                     <button
                                         onClick={() => handleVerify(req.requestId, req.requesterAddress)}
-                                        disabled={!!verifyingId} // Disable all verify buttons while one is in progress
-                                        className="mt-4 w-full bg-teal-500 text-white font-bold py-2 px-4 rounded-md hover:bg-teal-600 focus:outline-none transition-colors disabled:bg-slate-400 disabled:cursor-not-allowed"
+                                        disabled={req.status === 'verifying'}
+                                        className="mt-4 w-full flex items-center justify-center bg-teal-500 text-white font-bold py-2 px-4 rounded-md hover:bg-teal-600 focus:outline-none transition-colors disabled:bg-blue-400 disabled:cursor-not-allowed"
                                     >
-                                        {verifyingId === req.requestId ? 'Verifying on Blockchain...' : 'Verify Hospital'}
+                                        {req.status === 'verifying' ? (
+                                            <>
+                                                <Spinner />
+                                                Verifying on Blockchain...
+                                            </>
+                                        ) : 'Verify Hospital'}
                                     </button>
                                 </div>
                             ))}
