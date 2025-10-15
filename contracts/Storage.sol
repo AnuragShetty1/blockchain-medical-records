@@ -12,8 +12,8 @@ abstract contract Storage {
 
     // --- DATA STRUCTURES ---
 
-    // Defines the possible roles a user can have within the system.
-    enum Role { Patient, Doctor, HospitalAdmin, InsuranceProvider, Pharmacist, Researcher, Guardian, LabTechnician }
+    // [MODIFIED] Added SuperAdmin role.
+    enum Role { Patient, Doctor, HospitalAdmin, InsuranceProvider, Pharmacist, Researcher, Guardian, LabTechnician, SuperAdmin }
 
     // Represents a registered user in the system.
     struct User {
@@ -21,7 +21,7 @@ abstract contract Storage {
         string name;
         Role role;
         bool isVerified;
-        string publicKey; // Added for hybrid encryption
+        string publicKey;
     }
 
     // Stores additional profile information for a user.
@@ -42,7 +42,7 @@ abstract contract Storage {
         string category;
     }
 
-    // Defines the status of an access request from an insurance provider.
+    // Defines the status of an access request.
     enum RequestStatus { Pending, Approved, Rejected }
 
     // Represents a request for access, typically from an insurance provider for a claim.
@@ -53,6 +53,23 @@ abstract contract Storage {
         string claimId;
         RequestStatus status;
     }
+    
+    // [NEW] Struct to store hospital data.
+    struct Hospital {
+        uint256 hospitalId;
+        string name;
+        address adminAddress;
+        bool isVerified;
+    }
+    
+    // [NEW] Struct for hospital registration requests.
+    struct RegistrationRequest {
+        uint256 hospitalId;
+        string name;
+        address requesterAddress;
+        RequestStatus status;
+    }
+
 
     // --- STATE VARIABLES ---
 
@@ -61,14 +78,17 @@ abstract contract Storage {
     mapping(address => UserProfile) public userProfiles;
 
     // Record storage and access control
-    Record[] public records; // All records are stored in a single array. The index is the record ID.
-    mapping(address => uint256[]) public patientRecordIds; // Maps a patient's address to an array of their record IDs.
-    
-    // Manages access permissions on a per-record basis.
-    // recordId -> userAddress -> expirationTimestamp
+    Record[] public records;
+    mapping(address => uint256[]) public patientRecordIds;
     mapping(uint256 => mapping(address => uint256)) public recordAccess;
 
     // Insurance provider access request management
     mapping(address => AccessRequest[]) public patientRequests;
     uint256 internal _nextRequestId;
+
+    // [NEW] Hospital and role management
+    mapping(uint256 => Hospital) public hospitals;
+    uint256 public hospitalIdCounter;
+    mapping(uint256 => RegistrationRequest) public registrationRequests;
+    mapping(address => uint256) public userToHospital; // userAddress => hospitalId
 }

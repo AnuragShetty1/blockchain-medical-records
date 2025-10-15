@@ -14,16 +14,26 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
     // --- ERRORS ---
     error AlreadyRegistered();
     error NotRegistered();
-    error NotAnAdmin();
     error UserNotFound();
     error PublicKeyAlreadySet();
-    error CannotRegisterAsAdmin(); // <-- NEW CUSTOM ERROR
+    error CannotRegisterAsAdmin();
+    error NotSuperAdmin();
+    error RequestNotFoundOrAlreadyHandled();
+    error NotHospitalAdmin();
+    error RoleNotAllowed();
+    error UserAlreadyInHospital();
+    error UserNotInHospital();
+    error NotAuthorized();
 
     // --- EVENTS ---
     event UserRegistered(address indexed userAddress, string name, Role role);
     event UserVerified(address indexed admin, address indexed userAddress);
     event ProfileUpdated(address indexed user, string name, string contactInfo, string profileMetadataURI);
     event PublicKeySaved(address indexed user);
+    event RegistrationRequested(uint256 indexed hospitalId, string name, address indexed requester);
+    event HospitalVerified(uint256 indexed hospitalId, address indexed adminAddress);
+    event RoleAssigned(address indexed user, Role role, uint256 indexed hospitalId);
+    event RoleRevoked(address indexed user, Role role, uint256 indexed hospitalId);
 
     // Internal initializer to set up the parent contract.
     function __Roles_init(address initialOwner) internal onlyInitializing {
@@ -38,14 +48,14 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
      */
     function registerUser(string memory _name, Role _role) public {
         if (users[msg.sender].walletAddress != address(0)) { revert AlreadyRegistered(); }
-        if (_role == Role.HospitalAdmin) { revert CannotRegisterAsAdmin(); } // <-- UPDATED
+        if (_role == Role.HospitalAdmin || _role == Role.SuperAdmin) { revert CannotRegisterAsAdmin(); }
 
         users[msg.sender] = User({
             walletAddress: msg.sender,
             name: _name,
             role: _role,
             isVerified: false,
-            publicKey: "" // Public key is set in a separate step
+            publicKey: ""
         });
 
         userProfiles[msg.sender] = UserProfile({
@@ -59,7 +69,6 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
 
     /**
      * @dev Allows a user to save their public encryption key on-chain.
-     * This is a one-time action to build user trust and separate concerns.
      */
     function savePublicKey(string memory _publicKey) public {
         if (users[msg.sender].walletAddress == address(0)) { revert NotRegistered(); }
@@ -75,49 +84,94 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
     function updateUserProfile(string calldata _name, string calldata _contactInfo, string calldata _profileMetadataURI) public {
         if (users[msg.sender].walletAddress == address(0)) { revert NotRegistered(); }
 
-        userProfiles[msg.sender] = UserProfile({
-            name: _name,
-            contactInfo: _contactInfo,
-            profileMetadataURI: _profileMetadataURI
-        });
+        userProfiles[msg.sender].name = _name;
+        userProfiles[msg.sender].contactInfo = _contactInfo;
+        userProfiles[msg.sender].profileMetadataURI = _profileMetadataURI;
         users[msg.sender].name = _name;
 
         emit ProfileUpdated(msg.sender, _name, _contactInfo, _profileMetadataURI);
     }
 
-    /**
-     * @dev Allows the contract owner to add a new Hospital Admin.
-     * Admins are automatically verified upon creation.
-     */
-    function addHospitalAdmin(address _newAdmin, string memory _name) public onlyOwner {
-        if (users[_newAdmin].walletAddress != address(0)) { revert AlreadyRegistered(); }
+    // --- Hospital Management Functions ---
 
-        users[_newAdmin] = User({
-            walletAddress: _newAdmin,
-            name: _name,
+    /**
+     * @dev Allows anyone to request registration for a new hospital.
+     */
+    function requestRegistration(string memory hospitalName) public {
+        uint256 id = hospitalIdCounter++;
+        registrationRequests[id] = RegistrationRequest({
+            hospitalId: id,
+            name: hospitalName,
+            requesterAddress: msg.sender,
+            status: RequestStatus.Pending
+        });
+        emit RegistrationRequested(id, hospitalName, msg.sender);
+    }
+
+    /**
+     * @dev Allows the Super Admin (owner) to verify a hospital registration request.
+     */
+    function verifyHospital(uint256 hospitalId, address adminAddress) public onlyOwner {
+        if (registrationRequests[hospitalId].status != RequestStatus.Pending) {
+            revert RequestNotFoundOrAlreadyHandled();
+        }
+        if (users[adminAddress].walletAddress != address(0)) { revert AlreadyRegistered(); }
+
+        registrationRequests[hospitalId].status = RequestStatus.Approved;
+        
+        hospitals[hospitalId] = Hospital({
+            hospitalId: hospitalId,
+            name: registrationRequests[hospitalId].name,
+            adminAddress: adminAddress,
+            isVerified: true
+        });
+
+        users[adminAddress] = User({
+            walletAddress: adminAddress,
+            name: "Admin",
             role: Role.HospitalAdmin,
             isVerified: true,
-            publicKey: "" // Admin will set their key separately
+            publicKey: ""
         });
+        userProfiles[adminAddress] = UserProfile({ name: "Admin", contactInfo: "", profileMetadataURI: "" });
+        userToHospital[adminAddress] = hospitalId;
 
-        userProfiles[_newAdmin] = UserProfile({
-            name: _name,
-            contactInfo: "",
-            profileMetadataURI: ""
-        });
-
-        emit UserRegistered(_newAdmin, _name, Role.HospitalAdmin);
+        emit HospitalVerified(hospitalId, adminAddress);
+        emit UserRegistered(adminAddress, "Admin", Role.HospitalAdmin);
     }
 
     /**
-     * @dev Allows a verified Hospital Admin to verify other users (Doctors, etc.).
+     * @dev Allows a Hospital Admin to assign roles within their hospital.
      */
-    function verifyUser(address _userToVerify) public {
-        if (users[msg.sender].walletAddress == address(0)) { revert NotRegistered(); }
-        if (users[msg.sender].role != Role.HospitalAdmin || !users[msg.sender].isVerified) { revert NotAnAdmin(); }
-        if (users[_userToVerify].walletAddress == address(0)) { revert UserNotFound(); }
+    function assignRole(address user, Role role, uint256 hospitalId) public {
+        if (users[msg.sender].role != Role.HospitalAdmin || !users[msg.sender].isVerified) { revert NotHospitalAdmin(); }
+        if (userToHospital[msg.sender] != hospitalId) { revert NotAuthorized(); }
+        if (role != Role.Doctor && role != Role.LabTechnician) { revert RoleNotAllowed(); }
+        if (users[user].walletAddress == address(0)) { revert UserNotFound(); }
+        if (userToHospital[user] != 0) { revert UserAlreadyInHospital(); }
 
-        users[_userToVerify].isVerified = true;
-        emit UserVerified(msg.sender, _userToVerify);
+        users[user].role = role;
+        users[user].isVerified = true;
+        userToHospital[user] = hospitalId;
+
+        emit RoleAssigned(user, role, hospitalId);
+        emit UserVerified(msg.sender, user);
+    }
+
+    /**
+     * @dev Allows a Hospital Admin to revoke roles within their hospital.
+     */
+    function revokeRole(address user, Role role, uint256 hospitalId) public {
+        if (users[msg.sender].role != Role.HospitalAdmin || !users[msg.sender].isVerified) { revert NotHospitalAdmin(); }
+        if (userToHospital[msg.sender] != hospitalId) { revert NotAuthorized(); }
+        if (users[user].walletAddress == address(0)) { revert UserNotFound(); }
+        if (userToHospital[user] != hospitalId) { revert UserNotInHospital(); }
+
+        users[user].role = Role.Patient;
+        users[user].isVerified = false;
+        delete userToHospital[user];
+
+        emit RoleRevoked(user, role, hospitalId);
     }
 }
+
