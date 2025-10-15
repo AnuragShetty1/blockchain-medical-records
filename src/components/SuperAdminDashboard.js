@@ -1,123 +1,117 @@
 "use client";
+import { useState, useEffect, useCallback } from 'react';
+import axios from 'axios';
 
-import { useState } from 'react';
-import { useWeb3 } from '@/context/Web3Context';
-import toast from 'react-hot-toast';
-
-/**
- * SuperAdminDashboard component for the contract owner to add new Hospital Admins.
- * This component features a professional, card-based UI consistent with the application's design language.
- */
 export default function SuperAdminDashboard() {
-    // Web3 context for contract interaction
-    const { contract } = useWeb3();
+    const [pendingRequests, setPendingRequests] = useState([]);
+    const [verifiedHospitals, setVerifiedHospitals] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [verifyingId, setVerifyingId] = useState(null); // Tracks the ID of the request being verified
 
-    // State for form inputs and loading status
-    const [adminAddress, setAdminAddress] = useState('');
-    const [adminName, setAdminName] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
+    const API_URL = 'http://localhost:3001/api/super-admin';
 
-    /**
-     * Handles the form submission to add a new Hospital Admin.
-     * It performs validation, interacts with the smart contract, and provides user feedback via toasts.
-     * @param {React.FormEvent<HTMLFormElement>} e - The form submission event.
-     */
-    const handleAddAdmin = async (e) => {
-        e.preventDefault();
-        // Basic validation
-        if (!adminAddress || !adminName || !contract) {
-            toast.error("Please fill out all fields and ensure your wallet is connected.");
-            return;
-        }
-
+    const fetchRequestsAndHospitals = useCallback(async () => {
         setIsLoading(true);
-        const toastId = toast.loading("Submitting transaction to add new Hospital Admin...");
-
         try {
-            // Contract interaction
-            const tx = await contract.addHospitalAdmin(adminAddress, adminName);
-            await tx.wait(); // Wait for the transaction to be mined
-
-            // Success feedback
-            toast.success(`Successfully added ${adminName} as a new Hospital Admin.`, { id: toastId });
-
-            // Reset form fields
-            setAdminAddress('');
-            setAdminName('');
-        } catch (error) {
-            console.error("Failed to add admin:", error);
-            // Error feedback
-            toast.error("Failed to add admin. The address may already be registered.", { id: toastId });
+            const requestsResponse = await axios.get(`${API_URL}/requests`);
+            const hospitalsResponse = await axios.get(`${API_URL}/hospitals`);
+            setPendingRequests(requestsResponse.data.data || []);
+            setVerifiedHospitals(hospitalsResponse.data.data || []);
+        } catch (err) {
+            console.error("Error fetching data:", err);
+            setError(err.message || 'Failed to fetch data.');
         } finally {
             setIsLoading(false);
         }
+    }, []);
+
+    useEffect(() => {
+        fetchRequestsAndHospitals();
+    }, [fetchRequestsAndHospitals]);
+
+    // --- NEW, SIMPLIFIED & ROBUST VERIFICATION FLOW ---
+    const handleVerify = async (requestId, adminAddress) => {
+        setVerifyingId(requestId); // 1. Set loading state for this specific item
+        setError('');
+
+        try {
+            // 2. Call the API, which now waits for blockchain confirmation
+            const response = await axios.post(`${API_URL}/verify-hospital`, {
+                requestId,
+                adminAddress
+            });
+
+            if (response.data.success) {
+                // 3. On success, we know the database is updated. Fetch the new source of truth.
+                await fetchRequestsAndHospitals();
+            } else {
+                throw new Error(response.data.message || 'Verification failed.');
+            }
+
+        } catch (err) {
+            console.error("Error verifying hospital:", err);
+            setError(err.response?.data?.message || 'A critical error occurred during verification.');
+        } finally {
+            setVerifyingId(null); // 4. Clear the loading state
+        }
     };
 
+    if (isLoading && !verifyingId) {
+        return <div className="text-center p-8">Loading dashboard...</div>;
+    }
+
     return (
-        <div className="w-full max-w-lg p-8 space-y-6 bg-white rounded-2xl shadow-lg border border-slate-200">
-            {/* Header Section */}
-            <div className="text-center">
-                <h2 className="text-3xl font-bold text-gray-900">Super Admin Dashboard</h2>
-                <p className="mt-2 text-slate-500">You have contract owner privileges.</p>
-            </div>
+        <div className="container mx-auto p-4 md:p-8 bg-slate-50 rounded-lg shadow-md">
+            <h1 className="text-3xl font-bold text-slate-800 mb-6">Super Admin Dashboard</h1>
+            
+            {error && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">{error}</div>}
 
-            {/* Form Section */}
-            <div className="bg-slate-50 p-6 rounded-xl border border-slate-200">
-                <form onSubmit={handleAddAdmin} className="space-y-4">
-                    <h3 className="text-lg font-semibold text-slate-800 text-center">Create New Hospital Admin</h3>
-                    
-                    {/* Admin Address Input */}
-                    <div>
-                        <label htmlFor="address" className="block text-sm font-medium text-slate-700 mb-1">
-                            Admin's Wallet Address
-                        </label>
-                        <div className="relative">
-                            <svg className="w-6 h-6 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5zm-2.25-2.25v-1.5a2.25 2.25 0 012.25-2.25h15a2.25 2.25 0 012.25 2.25v1.5m-19.5-6.375a2.25 2.25 0 012.25-2.25h15a2.25 2.25 0 012.25 2.25v1.5" />
-                            </svg>
-                            <input
-                                id="address"
-                                type="text"
-                                value={adminAddress}
-                                onChange={(e) => setAdminAddress(e.target.value)}
-                                placeholder="0x..."
-                                className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-amber-500 focus:border-amber-500 transition"
-                                required
-                            />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Pending Requests Column */}
+                <div>
+                    <h2 className="text-2xl font-semibold text-slate-700 mb-4 border-b pb-2">Pending Hospital Requests</h2>
+                    {pendingRequests.length > 0 ? (
+                        <div className="space-y-4">
+                            {pendingRequests.map((req) => (
+                                <div key={req.requestId} className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
+                                    <h3 className="text-lg font-bold text-slate-800">{req.hospitalName}</h3>
+                                    <p className="text-sm text-slate-500 mt-1">Request ID: {req.requestId}</p>
+                                    <p className="text-sm text-slate-500 break-words">Admin: {req.requesterAddress}</p>
+                                    <button
+                                        onClick={() => handleVerify(req.requestId, req.requesterAddress)}
+                                        disabled={!!verifyingId} // Disable all verify buttons while one is in progress
+                                        className="mt-4 w-full bg-teal-500 text-white font-bold py-2 px-4 rounded-md hover:bg-teal-600 focus:outline-none transition-colors disabled:bg-slate-400 disabled:cursor-not-allowed"
+                                    >
+                                        {verifyingId === req.requestId ? 'Verifying on Blockchain...' : 'Verify Hospital'}
+                                    </button>
+                                </div>
+                            ))}
                         </div>
-                    </div>
+                    ) : (
+                        <p className="text-slate-500 mt-4">No pending requests at the moment.</p>
+                    )}
+                </div>
 
-                    {/* Admin Name Input */}
-                    <div>
-                        <label htmlFor="name" className="block text-sm font-medium text-slate-700 mb-1">
-                            Admin's Name
-                        </label>
-                        <div className="relative">
-                             <svg className="w-6 h-6 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M17.982 18.725A7.488 7.488 0 0012 15.75a7.488 7.488 0 00-5.982 2.975m11.963 0a9 9 0 10-11.963 0m11.963 0A8.966 8.966 0 0112 21a8.966 8.966 0 01-5.982-2.275M15 9.75a3 3 0 11-6 0 3 3 0 016 0z" />
-                            </svg>
-                            <input
-                                id="name"
-                                type="text"
-                                value={adminName}
-                                onChange={(e) => setAdminName(e.target.value)}
-                                placeholder="e.g., Apollo Hospital Admin"
-                                className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-amber-500 focus:border-amber-500 transition"
-                                required
-                            />
+                {/* Verified Hospitals Column */}
+                <div>
+                    <h2 className="text-2xl font-semibold text-slate-700 mb-4 border-b pb-2">Verified Hospitals</h2>
+                    {verifiedHospitals.length > 0 ? (
+                        <div className="space-y-4">
+                            {verifiedHospitals.map((hospital) => (
+                                <div key={hospital.hospitalId} className="bg-white p-4 rounded-lg shadow-sm border border-green-200">
+                                    <h3 className="text-lg font-bold text-green-800">{hospital.name}</h3>
+                                    <p className="text-sm text-slate-500 mt-1">Hospital ID: {hospital.hospitalId}</p>
+                                    <p className="text-sm text-slate-500 break-words">Admin: {hospital.adminAddress}</p>
+                                </div>
+                            ))}
                         </div>
-                    </div>
-
-                    {/* Submit Button */}
-                    <button
-                        type="submit"
-                        disabled={isLoading}
-                        className="w-full px-4 py-3 font-bold text-white bg-amber-500 rounded-lg hover:bg-amber-600 disabled:bg-slate-400 transition-colors shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500"
-                    >
-                        {isLoading ? 'Processing...' : 'Add Hospital Admin'}
-                    </button>
-                </form>
+                    ) : (
+                        <p className="text-slate-500 mt-4">No hospitals have been verified yet.</p>
+                    )}
+                </div>
             </div>
         </div>
     );
 }
+
