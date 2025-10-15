@@ -48,7 +48,11 @@ export default function SuperAdminDashboard() {
                 requestId,
                 adminAddress
             });
-            if (!response.data.success) {
+            if (response.data.success) {
+                // --- [THE FIX] ---
+                // Immediately fetch data to show the 'verifying' state.
+                await fetchRequestsAndHospitals();
+            } else {
                throw new Error(response.data.message || 'Verification failed.');
             }
         } catch (err) {
@@ -57,14 +61,17 @@ export default function SuperAdminDashboard() {
         }
     };
 
-    // --- [NEW] Handle Revocation ---
     const handleRevoke = async (hospitalId) => {
         setError('');
         try {
             const response = await axios.post(`${API_URL}/revoke-hospital`, {
                 hospitalId
             });
-            if (!response.data.success) {
+            if (response.data.success) {
+                // --- [THE FIX] ---
+                // Immediately fetch data to show the 'revoking' state.
+                await fetchRequestsAndHospitals();
+            } else {
                 throw new Error(response.data.message || 'Revocation failed.');
             }
         } catch (err) {
@@ -124,7 +131,6 @@ export default function SuperAdminDashboard() {
                                     <h3 className={`text-lg font-bold ${hospital.status === 'revoking' ? 'text-red-800' : 'text-green-800'}`}>{hospital.name}</h3>
                                     <p className="text-sm text-slate-500 mt-1">Hospital ID: {hospital.hospitalId}</p>
                                     <p className="text-sm text-slate-500 break-words">Admin: {hospital.adminAddress}</p>
-                                    {/* --- [NEW] Revoke Button --- */}
                                     <button
                                         onClick={() => handleRevoke(hospital.hospitalId)}
                                         disabled={hospital.status === 'revoking'}
