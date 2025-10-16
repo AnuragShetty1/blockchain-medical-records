@@ -37,12 +37,7 @@ const verifyHospital = async (hospitalId, adminAddress) => {
     }
 };
 
-// --- [NEW] ---
-/**
- * Calls the revokeHospital function on the smart contract.
- * @param {number} hospitalId - The ID of the hospital to revoke.
- * @returns {Promise<ethers.TransactionResponse>} The transaction response object.
- */
+
 const revokeHospital = async (hospitalId) => {
     if (!contract) {
         throw new Error('Ethers service is not initialized.');
@@ -56,10 +51,48 @@ const revokeHospital = async (hospitalId) => {
     }
 };
 
+// --- [NEW] ---
+/**
+ * Calls the assignRole function on the smart contract.
+ * @param {string} professionalAddress - The address of the professional.
+ * @param {number} hospitalId - The ID of the hospital.
+ * @param {string} role - The role to assign (e.g., 'Doctor', 'LabTechnician').
+ * @returns {Promise<ethers.TransactionResponse>} The transaction response object.
+ */
+const assignRole = async (professionalAddress, hospitalId, role) => {
+    if (!contract) throw new Error('Ethers service is not initialized.');
+    try {
+        const tx = await contract.assignRole(professionalAddress, BigInt(hospitalId), role);
+        return tx;
+    } catch (error) {
+        logger.error(`Error in assignRole contract call for ${professionalAddress}: ${error.message}`);
+        throw error;
+    }
+};
+
+/**
+ * Calls the revokeRole function on the smart contract.
+ * @param {string} professionalAddress - The address of the professional.
+ * @param {string} role - The role to revoke.
+ * @returns {Promise<ethers.TransactionResponse>} The transaction response object.
+ */
+const revokeRole = async (professionalAddress, role) => {
+    if (!contract) throw new Error('Ethers service is not initialized.');
+    try {
+        const tx = await contract.revokeRole(professionalAddress, role);
+        return tx;
+    } catch (error) {
+        logger.error(`Error in revokeRole contract call for ${professionalAddress}: ${error.message}`);
+        throw error;
+    }
+};
+
 
 init();
 
 module.exports = {
     verifyHospital,
-    revokeHospital, // Export the new function
+    revokeHospital,
+    assignRole,      // Export the new function
+    revokeRole,      // Export the new function
 };

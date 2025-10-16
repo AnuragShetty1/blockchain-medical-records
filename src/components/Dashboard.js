@@ -1,20 +1,12 @@
-/*
- * File: src/components/Dashboard.js
- * [MODIFIED]
- * This file is updated to route verified professionals to their dedicated dashboards.
- * It now renders DoctorDashboard and LabTechnicianDashboard based on user role.
- */
 "use client";
 import { useState, useEffect } from "react";
 import { useWeb3 } from "@/context/Web3Context";
 import toast from 'react-hot-toast';
 import Image from 'next/image';
 
-// Import the new professional dashboards
-import DoctorDashboard from "./DoctorView"; // Still named DoctorView.js, but contains DoctorDashboard logic
+import DoctorDashboard from "./DoctorView";
 import LabTechnicianDashboard from "./LabTechnicianDashboard";
-
-// Keep other existing imports
+import HospitalRequestPending from "./HospitalRequestPending";
 import UploadForm from "./UploadForm";
 import RecordList from "./RecordList";
 import AccessManager from "./AccessManager";
@@ -22,9 +14,9 @@ import RequestManager from "./RequestManager";
 import PendingVerification from "./PendingVerification";
 import Profile from "./Profile";
 import PublicKeySetup from "./PublicKeySetup";
+import AdminDashboard from "./AdminDashboard";
+import SuperAdminDashboard from "./SuperAdminDashboard";
 
-
-// SVG Icon components (unchanged)
 const DashboardIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>;
 const RecordsIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>;
 const AccessIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>;
@@ -35,7 +27,7 @@ const ProfileIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6
 
 
 export default function Dashboard() {
-    const { userProfile, records, requests, accessList, isRegistered, needsPublicKeySetup } = useWeb3();
+    const { userProfile, records, requests, accessList, needsPublicKeySetup, userStatus, owner, account } = useWeb3();
     const [activeView, setActiveView] = useState('dashboard');
     const [greeting, setGreeting] = useState('Welcome');
 
@@ -50,43 +42,59 @@ export default function Dashboard() {
         return <div className="text-center p-10"><p>Loading user profile...</p></div>;
     }
 
-    if (isRegistered && needsPublicKeySetup) {
-        return <PublicKeySetup />;
+    // --- [THE FIX] ---
+    // Mistake: The check for `needsPublicKeySetup` was happening before checking the `userStatus`.
+    // This incorrectly forced new, unapproved users into the key setup flow.
+    // Solution: The logic is now re-ordered to prioritize status. The "Secure My Account" page
+    // will only be shown if a user's status is 'approved' AND they need to set up their key.
+
+    // First, handle the highest privilege role.
+    if (account && owner && account.toLowerCase() === owner.toLowerCase()) {
+        return <SuperAdminDashboard />;
     }
 
-    const roleNames = ["Patient", "Doctor", "HospitalAdmin", "InsuranceProvider", "Pharmacist", "Researcher", "Guardian", "LabTechnician"];
-    const role = roleNames[Number(userProfile.role)];
+    // Next, handle all user states based on the status from our backend.
+    switch (userStatus) {
+        case 'pending_verification': // For Hospital Admins awaiting Super Admin approval
+            return <PendingVerification />;
+        
+        case 'pending': // For Professionals awaiting Hospital Admin approval
+            return <HospitalRequestPending />;
 
-    // --- NEW ROUTING LOGIC ---
-    if (role === "Doctor") {
-        return userProfile.isVerified ? <DoctorDashboard /> : <PendingVerification />;
+        case 'approved':
+            // Only if the user is approved, we then check if they need to set up their security keys.
+            if (needsPublicKeySetup) {
+                return <PublicKeySetup />;
+            }
+            // If keys are set up, proceed to show the correct dashboard based on their role.
+            switch (userProfile.role) {
+                case 'HospitalAdmin':
+                    return <AdminDashboard />;
+                case 'Doctor':
+                    return <DoctorDashboard />;
+                case 'LabTechnician':
+                    return <LabTechnicianDashboard />;
+                case 'Patient':
+                    // Patients fall through to the default patient dashboard UI below.
+                    break;
+                default:
+                    return <div className="text-center p-10"><p>Dashboard for role "{userProfile.role}" is not yet available.</p></div>;
+            }
+            break;
+        
+        default:
+            // This catches 'unregistered', 'revoked', etc., and will default to the patient view
+            // if for some reason an approved patient's status isn't caught above.
+            break;
     }
-    if (role === "LabTechnician") {
-        return userProfile.isVerified ? <LabTechnicianDashboard /> : <PendingVerification />;
-    }
-    // --- END NEW ROUTING LOGIC ---
 
-    if (role !== "Patient") {
-        return (
-            <div className="text-center p-10">
-                <p>Dashboard for role "{role}" is not yet available.</p>
-            </div>
-        );
-    }
-
+    // --- DEFAULT PATIENT DASHBOARD ---
     const handleCopyAddress = () => {
-        // execCommand is used for broader browser support.
-        const textArea = document.createElement("textarea");
-        textArea.value = userProfile.walletAddress;
-        document.body.appendChild(textArea);
-        textArea.select();
-        try {
-            document.execCommand('copy');
+        navigator.clipboard.writeText(userProfile.walletAddress).then(() => {
             toast.success('Address copied to clipboard!');
-        } catch (err) {
+        }, () => {
             toast.error('Failed to copy address.');
-        }
-        document.body.removeChild(textArea);
+        });
     };
 
     const renderContent = () => {
@@ -128,7 +136,7 @@ export default function Dashboard() {
     };
 
     const profileImageUrl = userProfile.profileMetadataURI
-        ? `https://gateway.pinata.cloud/ipfs/${userProfile.profileMetadataURI}`
+        ? `https://ipfs.io/ipfs/${userProfile.profileMetadataURI}`
         : '/default-avatar.svg';
 
     return (
@@ -247,7 +255,7 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
 
         const requestActivities = (requests || []).map((req, index) => ({
             type: 'Request Received',
-            description: `Access request for claim #${req.claimId}.`,
+            description: `Access request from ${req.requestor}.`,
             timestamp: Date.now() - index * 1000, 
             icon: <RequestsIcon />,
             color: 'text-amber-500',

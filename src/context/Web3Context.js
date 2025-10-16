@@ -49,6 +49,7 @@ export const Web3Provider = ({ children }) => {
 
     // User & Session State
     const [userProfile, setUserProfile] = useState(null);
+    const [userStatus, setUserStatus] = useState('unregistered'); // Add this new state
     const [isRegistered, setIsRegistered] = useState(false);
     const [isLoadingProfile, setIsLoadingProfile] = useState(true);
     const [keyPair, setKeyPair] = useState(null);
@@ -67,6 +68,7 @@ export const Web3Provider = ({ children }) => {
         setOwner(null);
         setUserProfile(null);
         setIsRegistered(false);
+        setUserStatus('unregistered');
         setRecords([]);
         setRequests([]);
         setAccessList([]);
@@ -159,38 +161,56 @@ export const Web3Provider = ({ children }) => {
         }
     }, [fetchPendingRequests]);
 
-    // --- SESSION SETUP & STATE CHECKING ---
+    // --- [REFACTORED] SESSION SETUP & STATE CHECKING ---
     const checkUserRegistrationAndState = useCallback(async (userAddress, contractInstance, signerInstance) => {
         setIsLoadingProfile(true);
         try {
-            const user = await contractInstance.users(userAddress);
-    
-            if (user.walletAddress === ethers.ZeroAddress) {
-                setIsRegistered(false);
-                setUserProfile(null);
-                setNeedsPublicKeySetup(false);
-                setKeyPair(null);
-            } else {
+            const response = await fetch(`http://localhost:3001/api/users/status/${userAddress}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch user status from the server.');
+            }
+            const data = await response.json();
+            
+            setUserStatus(data.status);
+
+            if (data.status !== 'unregistered') {
                 setIsRegistered(true);
-                const profile = await contractInstance.userProfiles(userAddress);
+                // Construct a profile object that matches the old structure for compatibility
                 const fullProfile = {
-                    walletAddress: user.walletAddress, role: user.role, isVerified: user.isVerified,
-                    publicKey: user.publicKey, name: profile.name, contactInfo: profile.contactInfo,
-                    profileMetadataURI: profile.profileMetadataURI,
+                    walletAddress: userAddress.toLowerCase(),
+                    role: data.role,
+                    isVerified: data.isVerified,
+                    hospitalId: data.hospitalId,
+                    // The publicKey will be fetched from the contract if needed,
+                    // but we can initialize it from the API if available.
+                    publicKey: data.publicKey || "", 
+                    name: data.name || "", // Assuming the API returns name
                 };
                 setUserProfile(fullProfile);
 
                 const loadedKeyPair = await loadKeyPair(signerInstance);
                 setKeyPair(loadedKeyPair);
+                
+                // --- [THE FIX] ---
+                // Only prompt for key setup if the user's role requires it AND they haven't set it up.
+                // Administrative roles like HospitalAdmin are now correctly excluded.
+                const rolesThatNeedKeys = ['Patient', 'Doctor', 'LabTechnician'];
+                const userNeedsKey = rolesThatNeedKeys.includes(fullProfile.role);
 
-                if (!fullProfile.publicKey || fullProfile.publicKey === "") {
+                if (userNeedsKey && (!fullProfile.publicKey || fullProfile.publicKey === "")) {
                     setNeedsPublicKeySetup(true);
                 } else {
                     setNeedsPublicKeySetup(false);
-                    if (Number(user.role) === 0) { // Patient
+                    // Only fetch detailed patient data if the role is Patient
+                    if (fullProfile.role === "Patient") {
                         await fetchPatientData(userAddress, contractInstance);
                     }
                 }
+            } else {
+                setIsRegistered(false);
+                setUserProfile(null);
+                setNeedsPublicKeySetup(false);
+                setKeyPair(null);
             }
         } catch (error) {
             console.error("!!! CRITICAL ERROR in checkUserRegistrationAndState !!!", error);
@@ -319,19 +339,14 @@ export const Web3Provider = ({ children }) => {
     // --- EVENT LISTENERS ---
     useEffect(() => {
         if (contract && account) {
-            // DEFINITIVE FIX: Switched to an intelligent refresh model.
             const handleRecordAdded = async (recordId, patientAddress, category) => {
                 if (patientAddress.toLowerCase() === account.toLowerCase()) {
                     addNotification(`A new record in the ${category} category was added.`);
                     toast.success("New record detected! Adding to your list...");
 
                     try {
-                        // Fetch the new record directly by its ID from the event
                         const newRecord = await contract.getRecordById(recordId);
-
-                        // Append the new record to the existing state immutably
                         setRecords(prevRecords => {
-                            // Prevent adding duplicates if the event fires multiple times
                             const recordExists = prevRecords.some(r => Number(r[0]) === Number(newRecord[0]));
                             if (recordExists) {
                                 return prevRecords;
@@ -340,7 +355,6 @@ export const Web3Provider = ({ children }) => {
                         });
                     } catch (error) {
                         console.error("Failed to fetch new record by ID, falling back to full refresh.", error);
-                        // Fallback to fetching the entire list if direct fetch fails
                         setTimeout(() => fetchPatientData(account, contract), 1000);
                     }
                 }
@@ -366,7 +380,7 @@ export const Web3Provider = ({ children }) => {
 
     return (
         <Web3Context.Provider value={{ 
-            signer, account, contract, owner, isRegistered, userProfile, 
+            signer, account, contract, owner, isRegistered, userProfile, userStatus,
             records, requests, isLoadingProfile, notifications, keyPair, needsPublicKeySetup,
             accessList,
             connectWallet, disconnectWallet, 
@@ -383,3 +397,4 @@ export const Web3Provider = ({ children }) => {
 export const useWeb3 = () => {
     return useContext(Web3Context);
 };
+

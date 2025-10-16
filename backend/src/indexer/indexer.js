@@ -7,7 +7,7 @@ const MedicalRecordsABI = require(path.join(__dirname, '../../../src/contracts/M
 const Hospital = require('../models/Hospital');
 const RegistrationRequest = require('../models/RegistrationRequest');
 const User = require('../models/User');
-const Record = require('../models/Record'); // [NEW] Import Record model
+const Record = require('../models/Record');
 
 const startIndexer = (wss) => {
 
@@ -17,8 +17,6 @@ const startIndexer = (wss) => {
     const contract = new ethers.Contract(config.contractAddress, MedicalRecordsABI, provider);
 
     logger.info(`Indexer connected to contract at address: ${config.contractAddress}`);
-
-    // --- Hospital Management Events ---
 
     contract.on('RegistrationRequested', async (requestId, hospitalName, requesterAddress, event) => {
         try {
@@ -70,19 +68,24 @@ const startIndexer = (wss) => {
             );
             logger.info(`[Indexer] Saved/Updated hospital: ${hospitalName}`);
             
+            // --- [BUG FIX #2] ---
+            // The `hospitalId` field is now correctly added to the Hospital Admin's user record.
+            // This ensures their dashboard can fetch requests for the hospital they manage.
             await User.findOneAndUpdate(
                 { address: adminAddress.toLowerCase() }, 
                 { 
-                    address: adminAddress.toLowerCase(), 
-                    name: `Admin for ${hospitalName}`,
-                    role: 'HospitalAdmin',
-                    professionalStatus: 'approved',
-                    isVerified: true,
-                    hospitalId: numericHospitalId,
+                    $set: {
+                        address: adminAddress.toLowerCase(), 
+                        name: `Admin for ${hospitalName}`,
+                        role: 'HospitalAdmin',
+                        professionalStatus: 'approved',
+                        isVerified: true,
+                        hospitalId: numericHospitalId,
+                    }
                 }, 
                 { upsert: true, new: true }
             );
-            logger.info(`[Indexer] Saved/Updated hospital admin: ${adminAddress}`);
+            logger.info(`[Indexer] Saved/Updated hospital admin: ${adminAddress} and linked to hospital ID ${numericHospitalId}`);
 
         } catch (error)
         {
@@ -113,11 +116,9 @@ const startIndexer = (wss) => {
         }
     });
 
-    // --- Role Management Events ---
-
     contract.on('RoleAssigned', async (userAddress, role, hospitalId, event) => {
         try {
-            const roleEnumToString = { 1: "Doctor", 2: "LabTechnician" };
+            const roleEnumToString = { 1: "Doctor", 7: "LabTechnician" };
             const roleName = roleEnumToString[Number(role)] || 'Unassigned Professional';
             logger.info(`[Event] RoleAssigned: ${roleName} to ${userAddress} for Hospital ID ${hospitalId}`);
             
@@ -146,7 +147,7 @@ const startIndexer = (wss) => {
                 { address: userAddress.toLowerCase() },
                 { 
                     $set: { 
-                        role: 'Patient', // Revert to base role
+                        role: 'Patient', 
                         professionalStatus: 'revoked',
                         isVerified: false,
                     },
@@ -162,8 +163,6 @@ const startIndexer = (wss) => {
             logger.error(`Error processing RoleRevoked event: ${error.message}`);
         }
     });
-
-    // --- [NEW] Record Management Event ---
     
     contract.on('RecordAdded', async (recordId, patient, uploadedBy, category, isVerified, encryptedKeyForPatient, encryptedKeyForHospital, event) => {
         try {
@@ -176,7 +175,6 @@ const startIndexer = (wss) => {
                     recordId: numericRecordId,
                     patientAddress: patient.toLowerCase(),
                     uploadedBy: uploadedBy.toLowerCase(),
-                    // ipfsHash is added via a separate API call before the transaction, so we don't upsert it here.
                     encryptedKeyForPatient: encryptedKeyForPatient,
                     encryptedKeyForHospital: encryptedKeyForHospital
                 },
@@ -192,3 +190,4 @@ const startIndexer = (wss) => {
 };
 
 module.exports = startIndexer;
+

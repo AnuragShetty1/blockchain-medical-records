@@ -1,3 +1,4 @@
+require('dotenv').config({ path: require('path').resolve(__dirname, '../../.env') }); // --- [THE FIX] --- This line MUST be first to load environment variables.
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -12,7 +13,7 @@ const startIndexer = require('./src/indexer/indexer');
 // --- Import API Routes ---
 const superAdminRoutes = require('./src/api/routes/superAdmin');
 const userRoutes = require('./src/api/routes/users');
-const hospitalAdminRoutes = require('./src/api/routes/hospitalAdmin'); // [NEW] Import hospital admin routes
+const hospitalAdminRoutes = require('./src/api/routes/hospitalAdmin');
 
 const app = express();
 
@@ -30,7 +31,7 @@ app.get('/', (req, res) => {
 // --- API Routes ---
 app.use('/api/super-admin', superAdminRoutes);
 app.use('/api/users', userRoutes);
-app.use('/api/hospital-admin', hospitalAdminRoutes); // [NEW] Use hospital admin routes
+app.use('/api/hospital-admin', hospitalAdminRoutes);
 
 // --- Global Error Handler ---
 app.use(errorHandler);
@@ -66,3 +67,4 @@ const startServer = async () => {
 };
 
 startServer();
+

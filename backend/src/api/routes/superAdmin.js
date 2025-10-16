@@ -24,15 +24,15 @@ router.get('/requests', async (req, res, next) => {
 
 /**
  * @route   GET /api/super-admin/hospitals
- * @desc    Fetch all ACTIVE and REVOKING hospitals
+ * @desc    Fetch all ACTIVE hospitals
  * @access  Public (for now)
  */
 router.get('/hospitals', async (req, res, next) => {
     try {
         // --- [CHANGE] ---
-        // Now fetches based on the new 'status' field to support the revocation flow.
+        // Now fetches only 'active' hospitals for the professional registration dropdown.
         const verifiedHospitals = await Hospital.find({ 
-            status: { $in: ['active', 'revoking'] } 
+            status: 'active'
         }).sort({ createdAt: -1 });
         res.json({ success: true, data: verifiedHospitals });
     } catch (error) {
@@ -140,4 +140,3 @@ router.post('/revoke-hospital', async (req, res, next) => {
 });
 
 module.exports = router;
-

@@ -57,7 +57,9 @@ router.post('/request-association', async (req, res, next) => {
     try {
         const { address, name, role, requestedHospitalId } = req.body;
 
-        if (!address || !name || !role || !requestedHospitalId) {
+        // --- THIS IS THE FIX ---
+        // The check is now more specific to handle a valid hospitalId of 0.
+        if (!address || !name || role === undefined || role === null || requestedHospitalId === undefined || requestedHospitalId === null) {
             return res.status(400).json({ success: false, message: 'Missing required fields.' });
         }
         
@@ -81,7 +83,11 @@ router.post('/request-association', async (req, res, next) => {
         );
 
         logger.info(`User ${name} (${lowerCaseAddress}) requested association with hospital ${requestedHospitalId}`);
-        res.status(200).json({ success: true, user: updatedUser });
+        res.status(200).json({ 
+            success: true, 
+            message: 'Affiliation request submitted successfully. Please wait for admin approval.',
+            user: updatedUser 
+        });
 
     } catch (error) {
         logger.error(`Error processing association request:`, error);
