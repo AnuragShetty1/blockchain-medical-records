@@ -38,8 +38,14 @@ const userSchema = new mongoose.Schema({
         type: Number,
         default: null,
     },
+    // The user's public key for data encryption, indicating setup is complete
+    publicKey: {
+        type: String,
+        default: null,
+    },
 }, { timestamps: true });
 
 const User = mongoose.model('User', userSchema);
 
 module.exports = User;
+

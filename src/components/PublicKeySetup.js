@@ -3,13 +3,31 @@
 import React from 'react';
 import { useWeb3 } from '@/context/Web3Context';
 import { ShieldCheck } from 'lucide-react';
+import toast from 'react-hot-toast'; // Import toast for local component error/loading handling
 
 const PublicKeySetup = () => {
-    const { savePublicKeyOnChain, userProfile } = useWeb3();
+    // [CHANGE] Destructure generateAndSetKeyPair and keyPair, and add local loading state
+    const { savePublicKeyOnChain, userProfile, generateAndSetKeyPair, keyPair } = useWeb3();
+    const [isLoading, setIsLoading] = React.useState(false);
 
     const handleSaveKey = async () => {
-        // The context already has the keypair loaded, just need to trigger the save.
-        await savePublicKeyOnChain();
+        setIsLoading(true);
+        try {
+            // [FIX] If keys are not in memory, generate them first (which includes wallet signature)
+            if (!keyPair || !keyPair.privateKey) {
+                const generated = await generateAndSetKeyPair();
+                if (!generated) throw new Error("Key generation failed or was cancelled.");
+            }
+
+            // Now trigger the save. The context will handle the state refresh upon success.
+            await savePublicKeyOnChain();
+        } catch (error) {
+            // Display error if anything fails during generation or saving
+            toast.error(error.message || "Failed to complete security setup.");
+            console.error("Setup failed:", error);
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (
@@ -22,9 +40,10 @@ const PublicKeySetup = () => {
                 </p>
                 <button
                     onClick={handleSaveKey}
-                    className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition-transform transform hover:scale-105"
+                    disabled={isLoading}
+                    className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition-transform transform hover:scale-105 disabled:bg-slate-500 disabled:cursor-wait"
                 >
-                    Secure My Account & Save Key
+                    {isLoading ? 'Processing...' : 'Secure My Account & Save Key'}
                 </button>
                 <p className="text-xs text-gray-500 mt-4">
                     This is a blockchain transaction and will require a small amount of gas.

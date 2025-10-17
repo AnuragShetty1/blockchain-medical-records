@@ -5,9 +5,9 @@ const RegistrationRequest = require('../../models/RegistrationRequest');
 const logger = require('../../utils/logger');
 
 /**
- * @route   GET /api/users/status/:address
- * @desc    Check the comprehensive status of a given wallet address.
- * @access  Public
+ * @route   GET /api/users/status/:address
+ * @desc    Check the comprehensive status of a given wallet address.
+ * @access  Public
  */
 router.get('/status/:address', async (req, res, next) => {
     try {
@@ -24,6 +24,9 @@ router.get('/status/:address', async (req, res, next) => {
                 isVerified: user.isVerified,
                 hospitalId: user.hospitalId,
                 requestedHospitalId: user.requestedHospitalId,
+                // [FIX] Include name and publicKey for frontend state synchronization
+                name: user.name,
+                publicKey: user.publicKey,
             });
         }
 
@@ -36,7 +39,7 @@ router.get('/status/:address', async (req, res, next) => {
         if (pendingRequest) {
             return res.json({ success: true, status: 'pending_verification' });
         }
-        
+
         // If no record found at all
         return res.json({ success: true, status: 'unregistered' });
 
@@ -48,10 +51,10 @@ router.get('/status/:address', async (req, res, next) => {
 
 
 /**
- * @route   POST /api/users/request-association
- * @desc    Allows a professional to request affiliation with a hospital.
- * @access  Private (Authenticated User)
- * @todo    Add JWT authentication middleware
+ * @route   POST /api/users/request-association
+ * @desc    Allows a professional to request affiliation with a hospital.
+ * @access  Private (Authenticated User)
+ * @todo    Add JWT authentication middleware
  */
 router.post('/request-association', async (req, res, next) => {
     try {
@@ -62,7 +65,7 @@ router.post('/request-association', async (req, res, next) => {
         if (!address || !name || role === undefined || role === null || requestedHospitalId === undefined || requestedHospitalId === null) {
             return res.status(400).json({ success: false, message: 'Missing required fields.' });
         }
-        
+
         const lowerCaseAddress = address.toLowerCase();
 
         // Find or create the user, then set their request details
@@ -83,10 +86,10 @@ router.post('/request-association', async (req, res, next) => {
         );
 
         logger.info(`User ${name} (${lowerCaseAddress}) requested association with hospital ${requestedHospitalId}`);
-        res.status(200).json({ 
-            success: true, 
+        res.status(200).json({
+            success: true,
             message: 'Affiliation request submitted successfully. Please wait for admin approval.',
-            user: updatedUser 
+            user: updatedUser
         });
 
     } catch (error) {

@@ -4,12 +4,10 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import RegistrationForm from "@/components/RegistrationForm";
 import Dashboard from "@/components/Dashboard";
-import AdminDashboard from "@/components/AdminDashboard";
-import SuperAdminDashboard from "@/components/SuperAdminDashboard";
-import InsuranceDashboard from "@/components/InsuranceDashboard";
+import SuperAdminDashboard from "@/components/SuperAdminDashboard"; // [FIX] Ensure SuperAdminDashboard is imported
 import DashboardSkeleton from "@/components/DashboardSkeleton";
 import HospitalRegistrationForm from "@/components/HospitalRegistrationForm";
-import HospitalRequestPending from "@/components/HospitalRequestPending"; // Use the new, specific component
+import HospitalRequestPending from "@/components/HospitalRequestPending";
 import { useWeb3 } from "@/context/Web3Context";
 import Image from 'next/image';
 
@@ -27,7 +25,7 @@ export default function Home() {
                     setUserStatus(response.data.status);
                 } catch (error) {
                     console.error("Failed to fetch user status:", error);
-                    setUserStatus('unregistered'); 
+                    setUserStatus('unregistered');
                 } finally {
                     setIsStatusLoading(false);
                 }
@@ -46,13 +44,15 @@ export default function Home() {
             return <DashboardSkeleton />;
         }
 
-        if (owner && account && account.toLowerCase() === owner.toLowerCase()) {
+        // [CRITICAL FIX] SuperAdmin Check MUST be here and return the specific dashboard component.
+        // This bypasses the need for a MongoDB profile (userProfile).
+        if (account && owner && account.toLowerCase() === owner.toLowerCase()) {
             return <SuperAdminDashboard />;
         }
+
+        // If not SuperAdmin, check for general registration/user status.
         if (isRegistered && userProfile) {
-            const role = Number(userProfile.role);
-            if (role === 2) { return <AdminDashboard />; }
-            if (role === 3) { return <InsuranceDashboard />; }
+            // The Dashboard component now handles all other roles (Admin, Doctor, Patient, etc.)
             return <Dashboard />;
         }
 
@@ -63,15 +63,15 @@ export default function Home() {
                 case 'unregistered':
                     return <RegistrationViews />;
                 default:
-                    return <DashboardSkeleton />; 
+                    return <DashboardSkeleton />;
             }
         }
-        
+
         return <WelcomeMessage />;
     };
 
     const RegistrationViews = () => (
-         <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
+        <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
             {/* Left Side: Informational Content */}
             <div className="p-8">
                 <h1 className="text-4xl lg:text-5xl font-bold text-slate-800 mb-4">
@@ -95,7 +95,7 @@ export default function Home() {
                             <p className="text-slate-500 text-sm">Your medical files are encrypted and stored decentrally on IPFS, not on a vulnerable central server.</p>
                         </div>
                     </li>
-                     <li className="flex items-start">
+                    <li className="flex items-start">
                         <svg className="w-6 h-6 text-teal-500 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeWidth="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
                         <div>
                             <h3 className="font-semibold text-slate-700">Seamless Interoperability</h3>
@@ -104,7 +104,7 @@ export default function Home() {
                     </li>
                 </ul>
             </div>
-            
+
             {/* Right Side: Registration Forms */}
             <div className="space-y-8">
                 <RegistrationForm />
@@ -123,13 +123,13 @@ export default function Home() {
             <div className="flex flex-col items-center justify-center space-y-4">
                 <div className="flex items-center space-x-3">
                     <h1 className="text-3xl font-bold text-gray-800 flex gap-1 justify-center items-center">Welcome to PRISM<Image
-                    src="/logo.png"
-                    alt="PRISM Logo"
-                    width={50}
-                    height={50}
-                /></h1>
+                        src="/logo.png"
+                        alt="PRISM Logo"
+                        width={50}
+                        height={50}
+                    /></h1>
                 </div>
-                
+
                 <p className="text-2xl font-bold font-semibold text-gray-600">
                     Patient Record Integrity and Security Management
                 </p>
@@ -146,4 +146,3 @@ export default function Home() {
         </div>
     );
 }
-
