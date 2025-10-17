@@ -390,13 +390,13 @@ export const Web3Provider = ({ children }) => {
                 }
             };
             
-            // New event handler for when the public key is saved on-chain.
             const handlePublicKeySaved = (userAddress) => {
                 if (userAddress.toLowerCase() === account.toLowerCase()) {
                     addNotification("Your encryption key was securely saved on-chain!");
-                    // The transaction function already flipped needsPublicKeySetup=false
-                    // This refresh ensures the 'publicKey' field is updated in the userProfile object.
-                    checkUserRegistrationAndState(account, contract, signer); 
+                    // --- [FINAL FIX APPLIED] ---
+                    // The race-condition-causing refresh call has been removed.
+                    // The optimistic update in `savePublicKeyOnChain` is now the single
+                    // source of truth for the UI transition, preventing the flicker.
                 }
             };
 
