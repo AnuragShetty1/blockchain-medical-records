@@ -1,26 +1,16 @@
 "use client";
-import { useState, useEffect } from "react";
-import { useWeb3 } from "@/context/Web3Context";
+
+import { useState, useEffect } from 'react';
+import { useWeb3 } from '@/context/Web3Context';
 import toast from 'react-hot-toast';
 import Image from 'next/image';
 
-// --- [THE FIX] ---
-// Step 1: Import the new, dedicated patient dashboard component.
-import PatientDashboard from "./PatientDashboard";
-import DoctorDashboard from "./DoctorView";
-import LabTechnicianDashboard from "./LabTechnicianDashboard";
-import HospitalRequestPending from "./HospitalRequestPending";
 import UploadForm from "./UploadForm";
-import RecordList from "./RecordList";
 import AccessManager from "./AccessManager";
 import RequestManager from "./RequestManager";
-import PendingVerification from "./PendingVerification";
 import Profile from "./Profile";
-import PublicKeySetup from "./PublicKeySetup";
-import AdminDashboard from "./AdminDashboard";
-import SuperAdminDashboard from "./SuperAdminDashboard";
-import InsuranceDashboard from "./InsuranceDashboard"; 
 
+// --- ICONS (kept within the component for encapsulation) ---
 const DashboardIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>;
 const RecordsIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>;
 const AccessIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>;
@@ -30,8 +20,8 @@ const UploadIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 
 const ProfileIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>;
 
 
-export default function Dashboard() {
-    const { userProfile, records, requests, accessList, needsPublicKeySetup, userStatus, owner, account } = useWeb3();
+export default function PatientDashboard() {
+    const { userProfile, records, requests, accessList } = useWeb3();
     const [activeView, setActiveView] = useState('dashboard');
     const [greeting, setGreeting] = useState('Welcome');
 
@@ -41,52 +31,106 @@ export default function Dashboard() {
         else if (hour < 18) setGreeting('Good Afternoon');
         else setGreeting('Good Evening');
     }, []);
+    
+    const handleCopyAddress = () => {
+        navigator.clipboard.writeText(userProfile.walletAddress).then(() => {
+            toast.success('Address copied to clipboard!');
+        }, () => {
+            toast.error('Failed to copy address.');
+        });
+    };
 
-    if (!userProfile) {
-        return <div className="text-center p-10"><p>Loading user profile...</p></div>;
-    }
+    const renderContent = () => {
+        switch (activeView) {
+            case 'dashboard':
+                return <DashboardOverview records={records || []} accessList={accessList || []} requests={requests || []} />;
+            case 'records':
+                return (
+                    <div className="p-8 bg-white rounded-2xl shadow-xl border border-slate-200">
+                        <h2 className="text-3xl font-bold text-slate-800 mb-6">My Records</h2>
+                        <UploadForm />
+                    </div>
+                );
+            case 'access':
+                return (
+                    <div className="p-8 bg-white rounded-2xl shadow-xl border border-slate-200">
+                        <h2 className="text-3xl font-bold text-slate-800 mb-6">Access Management</h2>
+                        <AccessManager />
+                    </div>
+                );
+            case 'requests':
+                return (
+                    <div className="p-8 bg-white rounded-2xl shadow-xl border border-slate-200">
+                        <h2 className="text-3xl font-bold text-slate-800 mb-6">Pending Requests</h2>
+                        <RequestManager />
+                    </div>
+                );
+            case 'profile':
+                return (
+                     <div className="p-8 bg-white rounded-2xl shadow-xl border border-slate-200">
+                        <h2 className="text-3xl font-bold text-slate-800 mb-6">My Profile</h2>
+                        <Profile />
+                    </div>
+                );
+            default:
+                return <DashboardOverview records={records || []} accessList={accessList || []} requests={requests || []} />;
+        }
+    };
 
-    switch (userStatus) {
-        case 'pending_verification':
-            return <PendingVerification />;
-        
-        case 'pending':
-            return <HospitalRequestPending />;
+    const profileImageUrl = userProfile.profileMetadataURI
+        ? `https://ipfs.io/ipfs/${userProfile.profileMetadataURI}`
+        : '/default-avatar.svg';
 
-        case 'approved':
-            if (needsPublicKeySetup) {
-                return <PublicKeySetup />;
-            }
-            switch (userProfile.role) {
-                case 'HospitalAdmin':
-                    return <AdminDashboard />;
-                case 'Doctor':
-                    return <DoctorDashboard />;
-                case 'LabTechnician':
-                    return <LabTechnicianDashboard />;
-                case 'Insurance': 
-                    return <InsuranceDashboard />; 
-                case 'SuperAdmin':
-                    return <SuperAdminDashboard />;
-                case 'Patient':
-                    // --- [THE FIX] ---
-                    // Step 2: Render the new component instead of the old UI.
-                    return <PatientDashboard />;
-                default:
-                    return <div className="text-center p-10"><p>Dashboard for role "{userProfile.role}" is not yet available.</p></div>;
-            }
-        
-        default:
-            if (userProfile.role === 'Patient') {
-                 // Also route to the new dashboard here for consistency.
-                 return <PatientDashboard />;
-            }
-            return <div className="text-center p-10"><p className="text-xl font-semibold text-slate-700">Your account status is currently: <span className="text-amber-600 font-bold">{userStatus}</span>. You must be approved or set up your keys to proceed.</p></div>;
-    }
+    return (
+        <div className="w-full min-h-[calc(100vh-128px)] bg-slate-100 flex">
+            <aside className="w-64 bg-white p-6 border-r border-slate-200 flex-col hidden md:flex">
+                <div className="flex flex-col items-center text-center mb-8">
+                    <Image
+                        src={profileImageUrl}
+                        alt="Profile Picture"
+                        width={96}
+                        height={96}
+                        className="rounded-full object-cover w-24 h-24 border-4 border-slate-200 shadow-md mb-4"
+                        onError={(e) => { e.target.onerror = null; e.target.src = '/default-avatar.svg'; }}
+                    />
+                    <h1 className="text-lg font-bold text-slate-800">{greeting},</h1>
+                    <p className="text-2xl font-bold text-teal-600">{userProfile.name}!</p>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg mb-8">
+                    <div className="flex justify-between items-center mb-2">
+                        <span className="font-semibold text-slate-700">Status</span>
+                        <span className={`px-2 py-1 text-xs font-bold rounded-full ${userProfile.isVerified ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                            {userProfile.isVerified ? "Verified" : "Not Verified"}
+                        </span>
+                    </div>
+                    <div className="text-sm text-slate-500">
+                        <p className="font-semibold text-slate-700">Wallet Address</p>
+                        <div className="flex items-center gap-2 mt-1">
+                            <p className="font-mono text-xs truncate">{userProfile.walletAddress}</p>
+                            <button onClick={handleCopyAddress} className="hover:text-teal-600 transition-colors">
+                                <CopyIcon />
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <nav className="flex flex-col space-y-2">
+                    <NavItem icon={<DashboardIcon />} label="Dashboard" active={activeView === 'dashboard'} onClick={() => setActiveView('dashboard')} />
+                    <NavItem icon={<RecordsIcon />} label="My Records" active={activeView === 'records'} onClick={() => setActiveView('records')} />
+                    <NavItem icon={<AccessIcon />} label="Access Management" active={activeView === 'access'} onClick={() => setActiveView('access')} />
+                    <NavItem icon={<RequestsIcon />} label="Pending Requests" active={activeView === 'requests'} onClick={() => setActiveView('requests')} notificationCount={requests?.length || 0} />
+                    <NavItem icon={<ProfileIcon />} label="My Profile" active={activeView === 'profile'} onClick={() => setActiveView('profile')} />
+                </nav>
+            </aside>
+
+            <main className="flex-1 p-6 sm:p-8 lg:p-10 overflow-y-auto">
+                {renderContent()}
+            </main>
+        </div>
+    );
 }
 
-// The old patient UI code below is now effectively unreachable and can be safely removed in a future cleanup.
-// No changes are needed here.
 const NavItem = ({ icon, label, active, onClick, notificationCount = 0 }) => (
     <button
         onClick={onClick}
@@ -112,7 +156,7 @@ const DashboardOverview = ({ records, accessList, requests }) => (
             <StatCard title="Pending Requests" value={requests?.length || 0} icon={<RequestsIcon />} highlight={(requests?.length || 0) > 0} />
         </div>
 
-        <div className="mt-10 bg-white rounded-lg shadow-sm border border-slate-200">
+        <div className="mt-10 bg-white rounded-2xl shadow-xl border border-slate-200">
             <h3 className="text-xl font-bold text-slate-800 p-6 border-b border-slate-200">Recent Activity</h3>
             <RecentActivityFeed records={records || []} accessList={accessList || []} requests={requests || []} />
         </div>
@@ -120,7 +164,7 @@ const DashboardOverview = ({ records, accessList, requests }) => (
 );
 
 const StatCard = ({ title, value, icon, highlight = false }) => (
-    <div className={`p-6 rounded-lg shadow-sm border ${highlight ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
+    <div className={`p-6 rounded-2xl shadow-xl border ${highlight ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
         <div className="flex items-center justify-between">
             <p className={`text-sm font-medium ${highlight ? 'text-amber-800' : 'text-slate-500'}`}>{title}</p>
             <div className={`${highlight ? 'text-amber-600' : 'text-slate-400'}`}>{icon}</div>
@@ -145,7 +189,7 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
         const accessActivities = (accessList || []).map((user, index) => ({
             type: 'Access Granted',
             description: `Access granted to ${user.name || 'a provider'}.`,
-            timestamp: Date.now() - index * 1000, 
+            timestamp: Date.now() - index * 10000,
             icon: <AccessIcon />,
             color: 'text-green-500',
             bgColor: 'bg-green-50'
@@ -154,7 +198,7 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
         const requestActivities = (requests || []).map((req, index) => ({
             type: 'Request Received',
             description: `Access request from ${req.requestor}.`,
-            timestamp: Date.now() - index * 1000, 
+            timestamp: Date.now() - index * 10000,
             icon: <RequestsIcon />,
             color: 'text-amber-500',
             bgColor: 'bg-amber-50'
@@ -189,3 +233,4 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
         </ul>
     );
 };
+
