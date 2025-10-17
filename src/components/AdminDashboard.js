@@ -4,13 +4,14 @@ import { useState, useEffect, useCallback } from 'react';
 import { useWeb3 } from '@/context/Web3Context';
 import toast from 'react-hot-toast';
 
-// --- ICONS ---
+// --- ICONS (omitted for brevity) ---
 const UserGroupIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.653-.124-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.653.124-1.283.356-1.857m0 0a3.004 3.004 0 01-2.704-2.143M4.644 16.143a3.004 3.004 0 012.704-2.143m0 0a3 3 0 10-5.708 0m5.708 0a3 3 0 10-5.708 0m5.708 0a3 3 0 105.708 0m-5.708 0a3 3 0 105.708 0" /></svg>;
 const CheckCircleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>;
 const XCircleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" /></svg>;
 const BadgeCheckIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" /></svg>;
 const ClockIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
 const CopyIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>;
+
 
 const StatusBadge = ({ status }) => {
     const statusStyles = {
@@ -35,16 +36,21 @@ export default function AdminDashboard() {
     const [activeTab, setActiveTab] = useState('pending');
 
     const fetchData = useCallback(async () => {
-        if (!userProfile?.hospitalId) {
+        if (userProfile?.hospitalId === null || userProfile?.hospitalId === undefined) {
             setIsLoading(false);
             return;
         }
+
         setIsLoading(true);
         try {
+            // --- [CORRECT CODE] ---
+            // This fetch call is now correct because the backend handles filtering.
+            // No query parameter is needed here.
             const [requestsRes, professionalsRes] = await Promise.all([
                 fetch(`http://localhost:3001/api/hospital-admin/requests/${userProfile.hospitalId}`),
                 fetch(`http://localhost:3001/api/hospital-admin/professionals/${userProfile.hospitalId}`),
             ]);
+            // --- [END CORRECT CODE] ---
 
             if (!requestsRes.ok || !professionalsRes.ok) {
                 throw new Error('Failed to fetch hospital data.');
@@ -208,3 +214,4 @@ export default function AdminDashboard() {
         </div>
     );
 }
+

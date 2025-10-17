@@ -181,31 +181,40 @@ export const Web3Provider = ({ children }) => {
                     role: data.role,
                     isVerified: data.isVerified,
                     hospitalId: data.hospitalId,
-                    // The publicKey will be fetched from the contract if needed,
-                    // but we can initialize it from the API if available.
                     publicKey: data.publicKey || "", 
-                    name: data.name || "", // Assuming the API returns name
+                    name: data.name || "",
                 };
                 setUserProfile(fullProfile);
 
-                const loadedKeyPair = await loadKeyPair(signerInstance);
-                setKeyPair(loadedKeyPair);
-                
                 // --- [THE FIX] ---
-                // Only prompt for key setup if the user's role requires it AND they haven't set it up.
-                // Administrative roles like HospitalAdmin are now correctly excluded.
+                // Only load the cryptographic key pair if the user is fully approved AND their role
+                // requires keys. This prevents the signature request for users who are pending verification.
                 const rolesThatNeedKeys = ['Patient', 'Doctor', 'LabTechnician'];
+                const userIsApproved = data.status === 'approved';
                 const userNeedsKey = rolesThatNeedKeys.includes(fullProfile.role);
 
-                if (userNeedsKey && (!fullProfile.publicKey || fullProfile.publicKey === "")) {
-                    setNeedsPublicKeySetup(true);
-                } else {
-                    setNeedsPublicKeySetup(false);
-                    // Only fetch detailed patient data if the role is Patient
-                    if (fullProfile.role === "Patient") {
-                        await fetchPatientData(userAddress, contractInstance);
+                if (userIsApproved && userNeedsKey) {
+                    const loadedKeyPair = await loadKeyPair(signerInstance);
+                    setKeyPair(loadedKeyPair);
+                    
+                    // Check if the user needs to complete the public key setup on-chain
+                    if (!fullProfile.publicKey || fullProfile.publicKey === "") {
+                        setNeedsPublicKeySetup(true);
+                    } else {
+                        setNeedsPublicKeySetup(false);
+                        // Fetch detailed patient data only if the role is Patient
+                        if (fullProfile.role === "Patient") {
+                            await fetchPatientData(userAddress, contractInstance);
+                        }
                     }
+                } else {
+                    // For users who are pending, unregistered, or have roles that don't need keys (e.g., admins),
+                    // ensure key-related states are reset.
+                    setKeyPair(null);
+                    setNeedsPublicKeySetup(false);
                 }
+                // --- [END FIX] ---
+
             } else {
                 setIsRegistered(false);
                 setUserProfile(null);

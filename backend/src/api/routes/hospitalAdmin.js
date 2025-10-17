@@ -51,16 +51,36 @@ router.get('/requests/:hospitalId', async (req, res, next) => {
 
 /**
  * @route   GET /api/hospital-admin/professionals/:hospitalId
- * @desc    Get all verified professionals for the admin's hospital
+ * @desc    Get all verified professionals for the admin's hospital, excluding the admin themselves.
  * @access  Private (Hospital Admin only)
  */
 router.get('/professionals/:hospitalId', async (req, res, next) => {
     try {
         const { hospitalId } = req.params;
-        const professionals = await User.find({
+
+        // --- [THE DEFINITIVE FIX] ---
+        // Step 1: Find the hospital record to get the admin's address.
+        const hospital = await Hospital.findOne({ hospitalId: hospitalId });
+
+        // If the hospital doesn't exist, there are no professionals to return.
+        if (!hospital) {
+            return res.json({ success: true, data: [] });
+        }
+
+        // Step 2: Get the admin's address from the hospital document.
+        // Based on your provided data, this field is `adminAddress`.
+        const adminAddress = hospital.adminAddress;
+
+        // Step 3: Construct a query to find all users for this hospital
+        // while explicitly excluding the admin's address.
+        const query = {
             hospitalId: hospitalId,
-            professionalStatus: { $in: ['approved', 'revoking'] }
-        }).select('address name role professionalStatus');
+            professionalStatus: { $in: ['approved', 'revoking'] },
+            address: { $ne: adminAddress } // Exclude the admin by their specific address
+        };
+        // --- [END FIX] ---
+
+        const professionals = await User.find(query).select('address name role professionalStatus');
 
         res.json({ success: true, data: professionals });
     } catch (error) {
@@ -78,7 +98,7 @@ router.get('/professionals/:hospitalId', async (req, res, next) => {
 router.post('/verify-professional', async (req, res, next) => {
     const { professionalAddress, hospitalId, role } = req.body;
 
-    if (!professionalAddress || hospitalId === undefined || !role) {
+    if (!professionalAddress || hospitalId === undefined || hospitalId === null || !role) {
         return res.status(400).json({ success: false, message: 'Professional address, hospital ID, and role are required.' });
     }
 
@@ -166,3 +186,4 @@ router.post('/revoke-professional', async (req, res, next) => {
 
 
 module.exports = router;
+
