@@ -49,7 +49,7 @@ export const Web3Provider = ({ children }) => {
 
     // User & Session State
     const [userProfile, setUserProfile] = useState(null);
-    const [userStatus, setUserStatus] = useState('unregistered'); // Add this new state
+    const [userStatus, setUserStatus] = useState('unregistered'); 
     const [isRegistered, setIsRegistered] = useState(false);
     const [isLoadingProfile, setIsLoadingProfile] = useState(true);
     const [keyPair, setKeyPair] = useState(null);
@@ -186,9 +186,7 @@ export const Web3Provider = ({ children }) => {
                 };
                 setUserProfile(fullProfile);
 
-                // --- [THE FIX] ---
-                // Only load the cryptographic key pair if the user is fully approved AND their role
-                // requires keys. This prevents the signature request for users who are pending verification.
+                // --- [KEY SETUP LOGIC] ---
                 const rolesThatNeedKeys = ['Patient', 'Doctor', 'LabTechnician'];
                 const userIsApproved = data.status === 'approved';
                 const userNeedsKey = rolesThatNeedKeys.includes(fullProfile.role);
@@ -197,12 +195,14 @@ export const Web3Provider = ({ children }) => {
                     const loadedKeyPair = await loadKeyPair(signerInstance);
                     setKeyPair(loadedKeyPair);
                     
-                    // Check if the user needs to complete the public key setup on-chain
-                    if (!fullProfile.publicKey || fullProfile.publicKey === "") {
+                    // Fix for state lag: Only show setup if both backend AND local state are missing the key.
+                    const keyMissingInDB = !fullProfile.publicKey || fullProfile.publicKey === "";
+                    
+                    if (keyMissingInDB && !loadedKeyPair) {
                         setNeedsPublicKeySetup(true);
                     } else {
                         setNeedsPublicKeySetup(false);
-                        // Fetch detailed patient data only if the role is Patient
+                        // Fetch detailed patient data only if the role is Patient and setup is complete
                         if (fullProfile.role === "Patient") {
                             await fetchPatientData(userAddress, contractInstance);
                         }
@@ -213,7 +213,7 @@ export const Web3Provider = ({ children }) => {
                     setKeyPair(null);
                     setNeedsPublicKeySetup(false);
                 }
-                // --- [END FIX] ---
+                // --- [END KEY SETUP LOGIC] ---
 
             } else {
                 setIsRegistered(false);
@@ -276,10 +276,8 @@ export const Web3Provider = ({ children }) => {
             const toastId = toast.loading("Saving your public key to the blockchain...");
             await tx.wait();
             toast.success("Security setup complete!", { id: toastId });
-            // [FIX 1: IMMEDIATE STATE REFRESH] 
-            // Call the checker immediately after the transaction is confirmed
-            // to fetch the updated user profile (with publicKey set) from the backend.
-            await checkUserRegistrationAndState(account, contract, signer);
+            // CRITICAL FIX: Immediately flip the state to resolve the race condition.
+            setNeedsPublicKeySetup(false); 
         } catch (error) {
             console.error("Error saving public key:", error);
             toast.error("Failed to save public key.");
@@ -379,25 +377,25 @@ export const Web3Provider = ({ children }) => {
                     checkUserRegistrationAndState(account, contract, signer);
                 }
             };
-            
-            // [FIX 2: EVENT-DRIVEN REFRESH] 
-            // New event handler for when the public key is saved on-chain.
-            const handlePublicKeySaved = (userAddress) => {
-                if (userAddress.toLowerCase() === account.toLowerCase()) {
-                    addNotification("Your encryption key was securely saved on-chain!");
-                    // Trigger a full state refresh to instantly move from PublicKeySetup to the correct Dashboard
-                    checkUserRegistrationAndState(account, contract, signer); 
-                }
-            };
+            
+            // New event handler for when the public key is saved on-chain.
+            const handlePublicKeySaved = (userAddress) => {
+                if (userAddress.toLowerCase() === account.toLowerCase()) {
+                    addNotification("Your encryption key was securely saved on-chain!");
+                    // The transaction function already flipped needsPublicKeySetup=false
+                    // This refresh ensures the 'publicKey' field is updated in the userProfile object.
+                    checkUserRegistrationAndState(account, contract, signer); 
+                }
+            };
 
             contract.on('RecordAdded', handleRecordAdded);
             contract.on('UserVerified', handleUserVerified);
-            contract.on('PublicKeySaved', handlePublicKeySaved); // Add new listener
+            contract.on('PublicKeySaved', handlePublicKeySaved); 
 
             return () => {
                 contract.off('RecordAdded', handleRecordAdded);
                 contract.off('UserVerified', handleUserVerified);
-                contract.off('PublicKeySaved', handlePublicKeySaved); // Cleanup new listener
+                contract.off('PublicKeySaved', handlePublicKeySaved); 
             };
         }
     }, [contract, account, signer, fetchPatientData, checkUserRegistrationAndState]);
