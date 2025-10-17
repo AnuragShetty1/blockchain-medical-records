@@ -5,6 +5,26 @@ const User = require('../../models/User');
 const logger = require('../../utils/logger');
 const ethersService = require('../../services/ethersService');
 
+// Helper function to extract a readable revert reason from a raw Ethers error
+const extractRevertReason = (error) => {
+    // Attempt to extract the reason from common Ethers error structures (v5/v6)
+    if (error.reason && typeof error.reason === 'string' && error.reason.length > 0) {
+        return error.reason;
+    }
+    if (error.data && error.data.message) {
+        // e.g., 'execution reverted: NotHospitalAdmin'
+        return error.data.message.replace('execution reverted: ', '').trim();
+    }
+    if (error.message && error.message.includes('revert')) {
+        // Fallback for generic message that might contain the revert reason
+        const match = error.message.match(/revert (.*?)(?=[,.]|$)/);
+        if (match && match[1]) return match[1].trim();
+    }
+    
+    // Return a generic error if no specific reason is found
+    return 'The smart contract transaction failed with an unknown error.';
+};
+
 /**
  * @route   GET /api/hospital-admin/hospitals/search
  * @desc    Search for active hospitals by name (case-insensitive)
@@ -58,7 +78,6 @@ router.get('/professionals/:hospitalId', async (req, res, next) => {
     try {
         const { hospitalId } = req.params;
 
-        // --- [THE DEFINITIVE FIX] ---
         // Step 1: Find the hospital record to get the admin's address.
         const hospital = await Hospital.findOne({ hospitalId: hospitalId });
 
@@ -68,7 +87,6 @@ router.get('/professionals/:hospitalId', async (req, res, next) => {
         }
 
         // Step 2: Get the admin's address from the hospital document.
-        // Based on your provided data, this field is `adminAddress`.
         const adminAddress = hospital.adminAddress;
 
         // Step 3: Construct a query to find all users for this hospital
@@ -78,8 +96,7 @@ router.get('/professionals/:hospitalId', async (req, res, next) => {
             professionalStatus: { $in: ['approved', 'revoking'] },
             address: { $ne: adminAddress } // Exclude the admin by their specific address
         };
-        // --- [END FIX] ---
-
+        
         const professionals = await User.find(query).select('address name role professionalStatus');
 
         res.json({ success: true, data: professionals });
@@ -116,6 +133,7 @@ router.post('/verify-professional', async (req, res, next) => {
             return res.status(409).json({ success: false, message: 'Request is not pending or does not exist.' });
         }
 
+        // The Smart Contract now allows the Super Admin (signer) to assign the role.
         const tx = await ethersService.assignRole(professionalAddress, hospitalId, role);
         logger.info(`Transaction sent. Hash: ${tx.hash}. Waiting for confirmation...`);
 
@@ -127,12 +145,14 @@ router.post('/verify-professional', async (req, res, next) => {
     } catch (error) {
         logger.error(`On-chain verification failed for professional ${professionalAddress}:`, error);
         
+        // Revert status on failure
         await User.findOneAndUpdate(
             { address: professionalAddress },
-            { $set: { professionalStatus: 'pending' } } // Revert status
+            { $set: { professionalStatus: 'pending' } } 
         );
 
-        const reason = error.reason || 'An error occurred during the blockchain transaction.';
+        // Use the new helper to get a specific reason
+        const reason = extractRevertReason(error);
         res.status(500).json({ success: false, message: reason });
     }
 });
@@ -143,27 +163,36 @@ router.post('/verify-professional', async (req, res, next) => {
  * @access  Private (Hospital Admin only)
  */
 router.post('/revoke-professional', async (req, res, next) => {
-    const { professionalAddress, role } = req.body;
+    const { professionalAddress } = req.body; 
 
-    if (!professionalAddress || !role) {
-        return res.status(400).json({ success: false, message: 'Professional address and role are required.' });
+    if (!professionalAddress) {
+        return res.status(400).json({ success: false, message: 'Professional address is required.' });
     }
 
     try {
         logger.info(`Revocation process started for professional: ${professionalAddress}`);
         
-        const user = await User.findOneAndUpdate(
-            { address: professionalAddress, professionalStatus: 'approved' },
-            { $set: { professionalStatus: 'revoking' } },
-            { new: true }
+        // Find the user to get their current role and hospital ID for the contract call
+        const user = await User.findOne(
+            { address: professionalAddress, professionalStatus: 'approved' }
         );
 
-        if (!user) {
-            logger.warn(`Professional ${professionalAddress} is not in an approved state.`);
+        if (!user || user.role === 'Patient' || !user.hospitalId) {
+            logger.warn(`Professional ${professionalAddress} is not in an approved state or lacks hospital affiliation.`);
             return res.status(409).json({ success: false, message: 'Professional is not approved or does not exist.' });
         }
 
-        const tx = await ethersService.revokeRole(professionalAddress, role);
+        // Use the role and hospitalId from the user document
+        const { role, hospitalId } = user;
+
+        // Transition status to revoking in MongoDB
+        await User.updateOne(
+            { _id: user._id },
+            { $set: { professionalStatus: 'revoking' } }
+        );
+
+        // The Smart Contract now allows the Super Admin (signer) to revoke the role.
+        const tx = await ethersService.revokeRole(professionalAddress, role, hospitalId);
         logger.info(`Transaction sent. Hash: ${tx.hash}. Waiting for confirmation...`);
 
         await tx.wait(1);
@@ -174,16 +203,17 @@ router.post('/revoke-professional', async (req, res, next) => {
     } catch (error) {
         logger.error(`On-chain revocation failed for professional ${professionalAddress}:`, error);
 
+        // Revert status on failure
         await User.findOneAndUpdate(
             { address: professionalAddress },
-            { $set: { professionalStatus: 'approved' } } // Revert status
+            { $set: { professionalStatus: 'approved' } } 
         );
-
-        const reason = error.reason || 'An error occurred during the blockchain transaction.';
+        
+        // Use the new helper to get a specific reason
+        const reason = extractRevertReason(error);
         res.status(500).json({ success: false, message: reason });
     }
 });
 
 
 module.exports = router;
-

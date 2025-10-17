@@ -7,6 +7,15 @@ const MedicalRecordsABI = require(path.join(__dirname, '../../../src/contracts/M
 let contract;
 let signer;
 
+// Mapping of human-readable role strings to the numerical enum index in Solidity.
+const ROLE_MAP = {
+    'Patient': 0,
+    'Doctor': 1,
+    'LabTechnician': 2,
+    'HospitalAdmin': 3,
+    'SuperAdmin': 4,
+};
+
 const init = () => {
     if (contract) {
         return; 
@@ -51,7 +60,6 @@ const revokeHospital = async (hospitalId) => {
     }
 };
 
-// --- [NEW] ---
 /**
  * Calls the assignRole function on the smart contract.
  * @param {string} professionalAddress - The address of the professional.
@@ -61,8 +69,13 @@ const revokeHospital = async (hospitalId) => {
  */
 const assignRole = async (professionalAddress, hospitalId, role) => {
     if (!contract) throw new Error('Ethers service is not initialized.');
+    const roleIndex = ROLE_MAP[role];
+    if (roleIndex === undefined) {
+        throw new Error(`Invalid role string: ${role}`);
+    }
     try {
-        const tx = await contract.assignRole(professionalAddress, BigInt(hospitalId), role);
+        // Contract signature: assignRole(address user, Role role, uint256 hospitalId)
+        const tx = await contract.assignRole(professionalAddress, roleIndex, BigInt(hospitalId));
         return tx;
     } catch (error) {
         logger.error(`Error in assignRole contract call for ${professionalAddress}: ${error.message}`);
@@ -74,12 +87,18 @@ const assignRole = async (professionalAddress, hospitalId, role) => {
  * Calls the revokeRole function on the smart contract.
  * @param {string} professionalAddress - The address of the professional.
  * @param {string} role - The role to revoke.
+ * @param {number} hospitalId - The ID of the hospital from which the role is revoked.
  * @returns {Promise<ethers.TransactionResponse>} The transaction response object.
  */
-const revokeRole = async (professionalAddress, role) => {
+const revokeRole = async (professionalAddress, role, hospitalId) => {
     if (!contract) throw new Error('Ethers service is not initialized.');
+    const roleIndex = ROLE_MAP[role];
+    if (roleIndex === undefined) {
+        throw new Error(`Invalid role string: ${role}`);
+    }
     try {
-        const tx = await contract.revokeRole(professionalAddress, role);
+        // Contract signature: revokeRole(address user, Role role, uint256 hospitalId)
+        const tx = await contract.revokeRole(professionalAddress, roleIndex, BigInt(hospitalId));
         return tx;
     } catch (error) {
         logger.error(`Error in revokeRole contract call for ${professionalAddress}: ${error.message}`);
@@ -93,6 +112,6 @@ init();
 module.exports = {
     verifyHospital,
     revokeHospital,
-    assignRole,      // Export the new function
-    revokeRole,      // Export the new function
+    assignRole, 
+    revokeRole,
 };

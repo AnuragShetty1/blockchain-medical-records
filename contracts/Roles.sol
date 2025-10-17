@@ -136,9 +136,14 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
         emit HospitalRevoked(hospitalId);
     }
 
+    // Allows the contract owner (Super Admin) OR the affiliated Hospital Admin to assign a role.
     function assignRole(address user, Role role, uint256 hospitalId) public {
-        if (users[msg.sender].role != Role.HospitalAdmin || !users[msg.sender].isVerified) { revert NotHospitalAdmin(); }
-        if (userToHospital[msg.sender] != hospitalId) { revert NotAuthorized(); }
+        // If the sender is not the contract owner (Super Admin), enforce the Hospital Admin checks.
+        if (msg.sender != owner()) { 
+            if (users[msg.sender].role != Role.HospitalAdmin || !users[msg.sender].isVerified) { revert NotHospitalAdmin(); }
+            if (userToHospital[msg.sender] != hospitalId) { revert NotAuthorized(); }
+        }
+
         if (role != Role.Doctor && role != Role.LabTechnician) { revert RoleNotAllowed(); }
         if (users[user].walletAddress == address(0)) { revert UserNotFound(); }
         if (userToHospital[user] != 0) { revert UserAlreadyInHospital(); }
@@ -154,9 +159,14 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
         emit UserVerified(msg.sender, user);
     }
 
+    // Allows the contract owner (Super Admin) OR the affiliated Hospital Admin to revoke a role.
     function revokeRole(address user, Role role, uint256 hospitalId) public {
-        if (users[msg.sender].role != Role.HospitalAdmin || !users[msg.sender].isVerified) { revert NotHospitalAdmin(); }
-        if (userToHospital[msg.sender] != hospitalId) { revert NotAuthorized(); }
+        // If the sender is not the contract owner (Super Admin), enforce the Hospital Admin checks.
+        if (msg.sender != owner()) {
+            if (users[msg.sender].role != Role.HospitalAdmin || !users[msg.sender].isVerified) { revert NotHospitalAdmin(); }
+            if (userToHospital[msg.sender] != hospitalId) { revert NotAuthorized(); }
+        }
+
         if (users[user].walletAddress == address(0)) { revert UserNotFound(); }
         if (userToHospital[user] != hospitalId) { revert UserNotInHospital(); }
 
@@ -170,4 +180,3 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
         emit RoleRevoked(user, role, hospitalId);
     }
 }
-
