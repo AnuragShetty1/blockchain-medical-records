@@ -20,7 +20,7 @@ const userSchema = new mongoose.Schema({
     // The user's off-chain professional status for affiliation workflow
     professionalStatus: {
         type: String,
-        enum: ['unaffiliated', 'pending', 'approved', 'rejected', 'revoked'],
+        enum: ['unaffiliated', 'pending', 'verifying', 'approved', 'rejected', 'revoking', 'revoked'],
         default: 'unaffiliated',
     },
     // Tracks if the user is verified on-chain by an admin

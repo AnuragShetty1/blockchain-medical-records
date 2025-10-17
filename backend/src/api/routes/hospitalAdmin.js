@@ -163,27 +163,32 @@ router.post('/verify-professional', async (req, res, next) => {
  * @access  Private (Hospital Admin only)
  */
 router.post('/revoke-professional', async (req, res, next) => {
-    const { professionalAddress } = req.body; 
+    // FIX: Destructure hospitalId from the request body, which is now sent by the frontend.
+    const { professionalAddress, hospitalId } = req.body; 
 
-    if (!professionalAddress) {
-        return res.status(400).json({ success: false, message: 'Professional address is required.' });
+    // FIX: Validate hospitalId.
+    if (!professionalAddress || hospitalId === undefined || hospitalId === null) {
+        return res.status(400).json({ success: false, message: 'Professional address and hospital ID are required.' });
     }
 
     try {
-        logger.info(`Revocation process started for professional: ${professionalAddress}`);
+        logger.info(`Revocation process started for professional: ${professionalAddress} at hospital ${hospitalId}`);
         
-        // Find the user to get their current role and hospital ID for the contract call
-        const user = await User.findOne(
-            { address: professionalAddress, professionalStatus: 'approved' }
-        );
+        // FIX: Add hospitalId to the query to ensure the professional belongs to the admin's hospital.
+        const user = await User.findOne({ 
+            address: professionalAddress, 
+            professionalStatus: 'approved',
+            hospitalId: hospitalId 
+        });
 
-        if (!user || user.role === 'Patient' || !user.hospitalId) {
-            logger.warn(`Professional ${professionalAddress} is not in an approved state or lacks hospital affiliation.`);
-            return res.status(409).json({ success: false, message: 'Professional is not approved or does not exist.' });
+        // FIX: Update the check and error message to be more specific.
+        if (!user || user.role === 'Patient') {
+            logger.warn(`Professional ${professionalAddress} is not in an approved state for hospital ${hospitalId}.`);
+            return res.status(409).json({ success: false, message: 'Professional is not approved or does not exist for this hospital.' });
         }
 
-        // Use the role and hospitalId from the user document
-        const { role, hospitalId } = user;
+        // The role and hospitalId from the user document are now reliably correct.
+        const { role } = user;
 
         // Transition status to revoking in MongoDB
         await User.updateOne(
@@ -192,7 +197,7 @@ router.post('/revoke-professional', async (req, res, next) => {
         );
 
         // The Smart Contract now allows the Super Admin (signer) to revoke the role.
-        const tx = await ethersService.revokeRole(professionalAddress, role, hospitalId);
+        const tx = await ethersService.revokeRole(professionalAddress, role, user.hospitalId);
         logger.info(`Transaction sent. Hash: ${tx.hash}. Waiting for confirmation...`);
 
         await tx.wait(1);
@@ -204,12 +209,12 @@ router.post('/revoke-professional', async (req, res, next) => {
         logger.error(`On-chain revocation failed for professional ${professionalAddress}:`, error);
 
         // Revert status on failure
+        // FIX: Make the revert query specific to the user at that hospital.
         await User.findOneAndUpdate(
-            { address: professionalAddress },
+            { address: professionalAddress, hospitalId: hospitalId },
             { $set: { professionalStatus: 'approved' } } 
         );
         
-        // Use the new helper to get a specific reason
         const reason = extractRevertReason(error);
         res.status(500).json({ success: false, message: reason });
     }
@@ -217,3 +222,4 @@ router.post('/revoke-professional', async (req, res, next) => {
 
 
 module.exports = router;
+

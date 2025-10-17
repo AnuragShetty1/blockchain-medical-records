@@ -41,7 +41,12 @@ export default function AdminDashboard() {
             return;
         }
 
-        setIsLoading(true);
+        // Keep isLoading true only on the first load
+        // Subsequent polling will refresh data in the background
+        if (requests.length === 0 && professionals.length === 0) {
+            setIsLoading(true);
+        }
+
         try {
             // Fetch pending requests and verified professionals for the hospital
             const [requestsRes, professionalsRes] = await Promise.all([
@@ -64,15 +69,18 @@ export default function AdminDashboard() {
         } finally {
             setIsLoading(false);
         }
-    }, [userProfile]);
+    }, [userProfile, requests.length, professionals.length]);
 
     useEffect(() => {
-        fetchData();
+        fetchData(); // Initial fetch
+        const intervalId = setInterval(fetchData, 5000); // Poll every 5 seconds to get status updates
+
+        return () => clearInterval(intervalId); // Cleanup interval on component unmount
     }, [fetchData]);
 
     const handleVerify = async (request) => {
         setProcessingId(request.address);
-        const toastId = toast.loading(`Verifying ${request.name}...`);
+        const toastId = toast.loading(`Initiating verification for ${request.name}...`);
         try {
             const response = await fetch('http://localhost:3001/api/hospital-admin/verify-professional', {
                 method: 'POST',
@@ -86,11 +94,10 @@ export default function AdminDashboard() {
             const data = await response.json();
             if (!response.ok) throw new Error(data.message);
 
-            toast.success(`${request.name} verified successfully!`, { id: toastId });
+            toast.success(`Verification process started for ${request.name}.`, { id: toastId });
             
-            // Optimistic UI update: Remove from requests, add to professionals
-            setRequests(prev => prev.filter(r => r.address !== request.address));
-            setProfessionals(prev => [...prev, { ...request, professionalStatus: 'approved' }]);
+            // Remove optimistic UI update. Polling will handle UI changes.
+            await fetchData(); // Immediately refetch to show 'verifying' status
 
         } catch (error) {
             console.error("Verification failed:", error);
@@ -102,14 +109,13 @@ export default function AdminDashboard() {
     
     const handleRevoke = async (professional) => {
         setProcessingId(professional.address);
-        const toastId = toast.loading(`Revoking access for ${professional.name}...`);
+        const toastId = toast.loading(`Initiating revocation for ${professional.name}...`);
         try {
             const response = await fetch('http://localhost:3001/api/hospital-admin/revoke-professional', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     professionalAddress: professional.address,
-                    // FIX: Include hospitalId, which is required by the updated backend/contract logic.
                     hospitalId: userProfile.hospitalId, 
                     role: professional.role,
                 }),
@@ -117,10 +123,10 @@ export default function AdminDashboard() {
             const data = await response.json();
             if (!response.ok) throw new Error(data.message);
 
-            toast.success(`Access for ${professional.name} has been revoked.`, { id: toastId });
+            toast.success(`Revocation process started for ${professional.name}.`, { id: toastId });
 
-            // Optimistic UI update: Remove from professionals
-            setProfessionals(prev => prev.filter(p => p.address !== professional.address));
+            // Remove optimistic UI update. Polling will handle UI changes.
+            await fetchData(); // Immediately refetch to show 'revoking' status
 
         } catch (error) {
             console.error("Revocation failed:", error);
@@ -131,7 +137,6 @@ export default function AdminDashboard() {
     };
 
     const handleCopyAddress = (address) => {
-        // Using document.execCommand('copy') as navigator.clipboard.writeText() may not work in some environments
         const el = document.createElement('textarea');
         el.value = address;
         document.body.appendChild(el);
@@ -141,9 +146,9 @@ export default function AdminDashboard() {
         toast.success('Address copied!');
     };
 
-    const renderList = (items, isPending) => {
+    const renderList = (items, isPendingList) => {
         if (isLoading) return <p className="p-10 text-center text-slate-500">Loading...</p>;
-        if (items.length === 0) return <p className="p-10 text-center text-slate-500">{isPending ? "No pending requests." : "No verified professionals."}</p>;
+        if (items.length === 0) return <p className="p-10 text-center text-slate-500">{isPendingList ? "No pending requests." : "No verified professionals."}</p>;
 
         return (
             <ul className="divide-y divide-slate-200">
@@ -161,14 +166,14 @@ export default function AdminDashboard() {
                             </div>
                         </div>
                         <div className="w-full sm:w-auto flex-shrink-0">
-                            {isPending ? (
+                            {isPendingList ? (
                                 <button
                                     onClick={() => handleVerify(item)}
-                                    disabled={processingId === item.address}
+                                    disabled={processingId === item.address || item.professionalStatus === 'verifying'}
                                     className="w-full flex items-center justify-center gap-2 px-4 py-2 font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-slate-400 disabled:cursor-wait transition-all shadow-sm"
                                 >
                                     <CheckCircleIcon />
-                                    {processingId === item.address ? 'Verifying...' : 'Verify'}
+                                    {item.professionalStatus === 'verifying' ? 'Verifying...' : 'Verify'}
                                 </button>
                             ) : (
                                 <button
@@ -177,7 +182,7 @@ export default function AdminDashboard() {
                                     className="w-full flex items-center justify-center gap-2 px-4 py-2 font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:bg-slate-400 disabled:cursor-wait transition-all shadow-sm"
                                 >
                                     <XCircleIcon />
-                                    {processingId === item.address ? 'Revoking...' : 'Revoke Access'}
+                                    {item.professionalStatus === 'revoking' ? 'Revoking...' : 'Revoke Access'}
                                 </button>
                             )}
                         </div>
