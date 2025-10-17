@@ -5,9 +5,9 @@ const RegistrationRequest = require('../../models/RegistrationRequest');
 const logger = require('../../utils/logger');
 
 /**
- * @route   GET /api/users/status/:address
- * @desc    Check the comprehensive status of a given wallet address.
- * @access  Public
+ * @route   GET /api/users/status/:address
+ * @desc    Check the comprehensive status of a given wallet address.
+ * @access  Public
  */
 router.get('/status/:address', async (req, res, next) => {
     try {
@@ -51,10 +51,10 @@ router.get('/status/:address', async (req, res, next) => {
 
 
 /**
- * @route   POST /api/users/request-association
- * @desc    Allows a professional to request affiliation with a hospital.
- * @access  Private (Authenticated User)
- * @todo    Add JWT authentication middleware
+ * @route   POST /api/users/request-association
+ * @desc    Allows a professional to request affiliation with a hospital.
+ * @access  Private (Authenticated User)
+ * @todo    Add JWT authentication middleware
  */
 router.post('/request-association', async (req, res, next) => {
     try {
@@ -94,6 +94,48 @@ router.post('/request-association', async (req, res, next) => {
 
     } catch (error) {
         logger.error(`Error processing association request:`, error);
+        next(error);
+    }
+});
+
+/**
+ * @route   POST /api/users/register-patient
+ * @desc    Creates a database record for a newly registered patient.
+ * @access  Private (Authenticated User)
+ */
+router.post('/register-patient', async (req, res, next) => {
+    try {
+        const { address, name } = req.body;
+
+        if (!address || !name) {
+            return res.status(400).json({ success: false, message: 'Missing required fields.' });
+        }
+
+        const lowerCaseAddress = address.toLowerCase();
+
+        const newPatient = await User.findOneAndUpdate(
+            { address: lowerCaseAddress },
+            {
+                $set: {
+                    address: lowerCaseAddress,
+                    name: name,
+                    role: 'Patient',
+                    isVerified: true, // Patients are auto-verified
+                    professionalStatus: 'approved', // Patients are approved by default
+                }
+            },
+            { upsert: true, new: true }
+        );
+
+        logger.info(`Patient ${name} (${lowerCaseAddress}) created in database.`);
+        res.status(201).json({
+            success: true,
+            message: 'Patient record created successfully.',
+            user: newPatient
+        });
+
+    } catch (error) {
+        logger.error(`Error processing patient registration:`, error);
         next(error);
     }
 });

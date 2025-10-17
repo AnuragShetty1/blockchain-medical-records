@@ -4,9 +4,6 @@ import { useState, useRef, useEffect } from 'react';
 import { useWeb3 } from '@/context/Web3Context';
 import toast from 'react-hot-toast';
 
-// --- [THE FIX] ---
-// Mistake: `generateAndSetKeyPair` was being imported and called in handleSubmit.
-// Solution: It has been removed from the import and the function call to prevent premature key generation.
 const roles = [
     { id: 0, name: 'Patient', description: 'The owner of the medical records.', icon: 'M12 12a5 5 0 110-10 5 5 0 010 10zm0-2a3 3 0 100-6 3 3 0 000 6z', isProfessional: false },
     { id: 1, name: 'Doctor', description: 'A verified healthcare professional.', icon: 'M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 10V9a2 2 0 00-2-2h-3m-4 0V4a2 2 0 012-2h4a2 2 0 012 2v2', isProfessional: true },
@@ -139,12 +136,34 @@ export default function RegistrationForm() {
                 toast.success('Request submitted! Please wait for admin approval.', { id: toastId });
 
             } else {
+                // --- [THE FIX] ---
+                // This logic now mirrors the professional flow for robustness.
+                // Step 1: On-chain transaction.
+                toast.loading('Step 1/2: Creating on-chain identity...', { id: toastId });
                 if (!contract) { throw new Error('Contract not initialized.'); }
                 const tx = await contract.registerUser(name, selectedRole);
                 await tx.wait();
-                toast.success('Registration successful! Please wait...', { id: toastId });
+                toast.success('On-chain identity created!', { id: toastId });
+                
+                // Step 2: Explicitly create the user in the database via the new API endpoint.
+                toast.loading('Step 2/2: Setting up your account...', { id: toastId });
+                const response = await fetch('http://localhost:3001/api/users/register-patient', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: name,
+                        address: account,
+                    }),
+                });
+
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.message || `HTTP error! Status: ${response.status}`);
+                }
+                toast.success('Account setup complete! Redirecting...', { id: toastId });
             }
             
+            // This refresh is now guaranteed to find the user record created by the API call.
             await checkUserRegistration();
 
         } catch (error) {

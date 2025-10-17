@@ -158,7 +158,7 @@ const startIndexer = (wss) => {
                 }, 
                 { new: true }
             );
-             logger.info(`[Indexer] User ${userAddress} status updated to 'revoked'.`);
+                logger.info(`[Indexer] User ${userAddress} status updated to 'revoked'.`);
         } catch (error) {
             logger.error(`Error processing RoleRevoked event: ${error.message}`);
         }
@@ -189,7 +189,7 @@ const startIndexer = (wss) => {
                 );
                 logger.info(`[Indexer] User ${userAddress} public key updated in database.`);
             } else {
-                 logger.warn(`[Indexer] PublicKeySaved event for ${userAddress} but key is empty on-chain.`);
+                    logger.warn(`[Indexer] PublicKeySaved event for ${userAddress} but key is empty on-chain.`);
             }
         } catch (error) {
             logger.error(`Error processing PublicKeySaved event: ${error.message}`);
@@ -222,3 +222,4 @@ const startIndexer = (wss) => {
 };
 
 module.exports = startIndexer;
+
