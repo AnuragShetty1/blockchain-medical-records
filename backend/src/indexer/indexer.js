@@ -163,6 +163,38 @@ const startIndexer = (wss) => {
             logger.error(`Error processing RoleRevoked event: ${error.message}`);
         }
     });
+
+    // --- [FIX APPLIED] ---
+    // Added the missing event listener for PublicKeySaved.
+    // This ensures that when a professional user completes their security setup,
+    // their public key is fetched from the contract and saved to the off-chain database.
+    // This resolves the core issue of professionals being stuck in the setup loop.
+    contract.on('PublicKeySaved', async (userAddress, event) => {
+        try {
+            logger.info(`[Event] PublicKeySaved: for user ${userAddress}`);
+            
+            // Retrieve the public key directly from the contract state to ensure data integrity
+            const userOnChain = await contract.users(userAddress);
+            const publicKey = userOnChain.publicKey;
+
+            if (publicKey && publicKey.length > 0) {
+                await User.findOneAndUpdate(
+                    { address: userAddress.toLowerCase() },
+                    { 
+                        $set: { 
+                            publicKey: publicKey,
+                        } 
+                    },
+                    { new: true }
+                );
+                logger.info(`[Indexer] User ${userAddress} public key updated in database.`);
+            } else {
+                 logger.warn(`[Indexer] PublicKeySaved event for ${userAddress} but key is empty on-chain.`);
+            }
+        } catch (error) {
+            logger.error(`Error processing PublicKeySaved event: ${error.message}`);
+        }
+    });
     
     contract.on('RecordAdded', async (recordId, patient, uploadedBy, category, isVerified, encryptedKeyForPatient, encryptedKeyForHospital, event) => {
         try {
@@ -190,4 +222,3 @@ const startIndexer = (wss) => {
 };
 
 module.exports = startIndexer;
-
