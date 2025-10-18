@@ -1,5 +1,5 @@
 "use client";
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useWeb3 } from '@/context/Web3Context';
 import toast from 'react-hot-toast';
 import { ethers } from 'ethers';
@@ -9,12 +9,25 @@ import { rewrapSymmetricKey } from '@/utils/crypto';
 const ShareIcon = () => <svg className="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.186 2.25 2.25 0 00-3.933 2.186z" /></svg>;
 const CloseIcon = () => <svg className="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>;
 
-export default function AccessManager({ records, onClose }) {
+export default function AccessManager({ 
+    isOpen, 
+    onClose, 
+    onGrantSuccess,
+    records: initialRecords, 
+    preselectedRecords, 
+    preselectedProfessional 
+}) {
     const { contract, keyPair } = useWeb3();
-    const [granteeAddress, setGranteeAddress] = useState('');
-    const [duration, setDuration] = useState(30);
+    
+    // FIX: The component now correctly uses the preselected professional's address and disables the input for the approval flow.
+    const [granteeAddress, setGranteeAddress] = useState(preselectedProfessional?.address || '');
+    const [duration, setDuration] = useState('30');
     const [customDuration, setCustomDuration] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+
+    // FIX: The component was crashing because the 'records' prop was undefined in the approval flow.
+    // This line ensures `records` is always a valid array, prioritizing `preselectedRecords` when available.
+    const records = preselectedRecords || initialRecords || [];
 
     const isBulkShare = records.length > 1;
     const finalDuration = duration === 'custom' ? Number(customDuration) : Number(duration);
@@ -38,7 +51,6 @@ export default function AccessManager({ records, onClose }) {
         const toastId = toast.loading("Verifying professional and checking permissions...");
 
         try {
-            // --- PRE-FLIGHT CHECKS ---
             const professional = await contract.users(granteeAddress);
             if (professional.walletAddress === ethers.ZeroAddress || !professional.isVerified) {
                 throw new Error("This address does not belong to a verified professional.");
@@ -47,38 +59,35 @@ export default function AccessManager({ records, onClose }) {
                 throw new Error("Cannot grant access to a patient.");
             }
             if (!professional.publicKey) {
-                throw new Error("This professional has not set up their encryption key. They must log in to the application first.");
+                throw new Error("This professional has not set up their encryption key.");
             }
 
-            const now = Math.floor(Date.now() / 1000);
-            const accessChecks = records.map(r => contract.recordAccess(r.id, granteeAddress));
-            const accessTimestamps = await Promise.all(accessChecks);
-
-            const validRecordsToShare = records.filter((_, index) => Number(accessTimestamps[index]) <= now);
-
-            if (validRecordsToShare.length === 0) {
-                 throw new Error("Access has already been granted to this professional for all selected records.");
-            }
-            if (validRecordsToShare.length < records.length) {
-                toast.success(`Skipping ${records.length - validRecordsToShare.length} record(s) where access is already granted.`, { id: toastId });
-            }
-
-            // --- CRYPTOGRAPHIC & ON-CHAIN WORK ---
             toast.loading("Fetching encrypted data and preparing secure keys...", { id: toastId });
             
             const professionalPublicKey = professional.publicKey;
+            const recordIdsToGrant = records.map(r => r.recordId);
 
-            const recordIdsToGrant = validRecordsToShare.map(r => r.id);
             const encryptedDeks = await Promise.all(
-                validRecordsToShare.map(async (record) => {
-                    if (!record.metadata || !record.metadata.encryptedBundleIPFSHash) {
-                        throw new Error(`Critical error: Cannot find encrypted data location for record ${record.id}.`);
+                records.map(async (record) => {
+                    const fullRecordData = await contract.records(record.recordId);
+                    const ipfsHash = fullRecordData.ipfsHash;
+                    
+                    if (!ipfsHash) {
+                         throw new Error(`Critical error: Cannot find IPFS hash for record ${record.recordId}.`);
                     }
-                    const response = await fetch(`https://ipfs.io/ipfs/${record.metadata.encryptedBundleIPFSHash}`);
+
+                    const response = await fetch(`https://ipfs.io/ipfs/${ipfsHash}`);
                     if (!response.ok) {
-                        throw new Error(`Failed to fetch encrypted data for record ${record.id} from IPFS.`);
+                        throw new Error(`Failed to fetch metadata for record ${record.recordId} from IPFS.`);
                     }
-                    const encryptedBundle = await response.json();
+                    const metadata = await response.json();
+                    const bundleHash = metadata.encryptedBundleIPFSHash;
+                    
+                    const bundleResponse = await fetch(`https://ipfs.io/ipfs/${bundleHash}`);
+                     if (!bundleResponse.ok) {
+                        throw new Error(`Failed to fetch encrypted data for record ${record.recordId} from IPFS.`);
+                    }
+                    const encryptedBundle = await bundleResponse.json();
                     
                     const rewrappedDek = await rewrapSymmetricKey(
                         encryptedBundle,
@@ -98,27 +107,33 @@ export default function AccessManager({ records, onClose }) {
             }
 
             await tx.wait();
-
             toast.success(`Access granted successfully for ${finalDuration} days!`, { id: toastId });
-            onClose();
+            
+            // FIX: Call the correct success handler depending on the flow.
+            if (onGrantSuccess) {
+                onGrantSuccess();
+            } else {
+                onClose();
+            }
 
         } catch (error) {
             console.error("Failed to grant access:", error);
             let errorMessage = "An unexpected error occurred.";
-             if (error.reason) {
-                 if (error.reason.includes("AccessAlreadyGranted")) {
-                     errorMessage = "This professional already has active access to this record.";
-                 } else {
-                     errorMessage = error.reason;
-                 }
-             } else if (error.message) {
-                 errorMessage = error.message;
-             }
+              if (error.reason) {
+                  errorMessage = error.reason;
+              } else if (error.message) {
+                  errorMessage = error.message;
+              }
             toast.error(errorMessage, { id: toastId });
         } finally {
             setIsLoading(false);
         }
     };
+    
+    // The component is rendered by the parent, so we check the `isOpen` prop.
+    if (!isOpen) {
+        return null;
+    }
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
@@ -138,8 +153,8 @@ export default function AccessManager({ records, onClose }) {
                     <div>
                         <h2 className="text-2xl font-bold text-slate-900">{isBulkShare ? `Share ${records.length} Records` : 'Share Record'}</h2>
                         {!isBulkShare && records && records.length > 0 && (
-                            <p className="text-slate-500 truncate" title={records[0].metadata?.description}>
-                                Sharing: "{records[0].metadata?.description || `Record ID: ${records[0].id}`}"
+                            <p className="text-slate-500 truncate" title={records[0].title}>
+                                Sharing: "{records[0].title || `Record ID: ${records[0].recordId}`}"
                             </p>
                         )}
                     </div>
@@ -156,8 +171,9 @@ export default function AccessManager({ records, onClose }) {
                             value={granteeAddress}
                             onChange={(e) => setGranteeAddress(e.target.value)}
                             placeholder="Enter wallet address (0x...)"
-                            className="w-full px-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500 transition"
+                            className="w-full px-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500 transition disabled:bg-slate-100"
                             required
+                            disabled={!!preselectedProfessional}
                         />
                     </div>
 
@@ -211,4 +227,3 @@ export default function AccessManager({ records, onClose }) {
         </div>
     );
 }
-
