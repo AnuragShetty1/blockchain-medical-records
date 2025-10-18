@@ -11,129 +11,151 @@ const FileIcon = () => <svg className="w-6 h-6 text-slate-500" xmlns="http://www
 const CloseIcon = () => <svg className="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>;
 
 export default function VerifiedUploadForm({ patientProfile, onUploadSuccess, allowedCategories }) {
-    const { contract, userProfile: professionalProfile } = useWeb3();
-    const [file, setFile] = useState(null);
-    const [isUploading, setIsUploading] = useState(false);
-    const [isDragActive, setIsDragActive] = useState(false);
-    const [description, setDescription] = useState('');
-    const [category, setCategory] = useState(allowedCategories[0]?.value || 'other');
+    const { contract, userProfile: professionalProfile } = useWeb3();
+    const [file, setFile] = useState(null);
+    const [isUploading, setIsUploading] = useState(false);
+    const [isDragActive, setIsDragActive] = useState(false);
+    const [title, setTitle] = useState(''); // <-- Renamed from description
+    const [category, setCategory] = useState(allowedCategories[0]?.value || 'other');
 
-    const handleDrop = useCallback((e) => { e.preventDefault(); e.stopPropagation(); setIsDragActive(false); if (e.dataTransfer.files?.[0]) { setFile(e.dataTransfer.files[0]); } }, []);
-    const handleChange = (e) => { if (e.target.files?.[0]) { setFile(e.target.files[0]); } };
-    const handleDrag = useCallback((e) => { e.preventDefault(); e.stopPropagation(); }, []);
-    const handleDragEnter = useCallback((e) => { handleDrag(e); setIsDragActive(true); }, [handleDrag]);
-    const handleDragLeave = useCallback((e) => { handleDrag(e); setIsDragActive(false); }, [handleDrag]);
+    const handleDrop = useCallback((e) => { e.preventDefault(); e.stopPropagation(); setIsDragActive(false); if (e.dataTransfer.files?.[0]) { setFile(e.dataTransfer.files[0]); } }, []);
+    const handleChange = (e) => { if (e.target.files?.[0]) { setFile(e.target.files[0]); } };
+    const handleDrag = useCallback((e) => { e.preventDefault(); e.stopPropagation(); }, []);
+    const handleDragEnter = useCallback((e) => { handleDrag(e); setIsDragActive(true); }, [handleDrag]);
+    const handleDragLeave = useCallback((e) => { handleDrag(e); setIsDragActive(false); }, [handleDrag]);
 
-    const resetForm = () => {
-        setFile(null);
-        setDescription('');
-        setCategory(allowedCategories[0]?.value || 'other');
-    };
+    const resetForm = () => {
+        setFile(null);
+        setTitle(''); // <-- Renamed from setDescription
+        setCategory(allowedCategories[0]?.value || 'other');
+    };
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        if (!file || !description || !category) {
-            toast.error("Please provide a file, description, and category.");
-            return;
-        }
-        if (!contract || !professionalProfile?.publicKey || !patientProfile?.publicKey) {
-            toast.error("User profiles not fully loaded. Cannot encrypt.");
-            return;
-        }
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!file || !title || !category) { // <-- Renamed from description
+            toast.error("Please provide a file, title, and category."); // <-- Updated message
+            return;
+        }
+        if (!contract || !professionalProfile?.publicKey || !patientProfile?.publicKey) {
+            toast.error("User profiles not fully loaded. Cannot encrypt.");
+            return;
+        }
 
-        setIsUploading(true);
-        const toastId = toast.loading("Encrypting file for patient and self...");
+        setIsUploading(true);
+        const toastId = toast.loading("Encrypting file for patient and self...");
 
-        try {
-            const fileBuffer = await file.arrayBuffer();
-            // Encrypt for both the patient and the professional uploading it
-            const recipientPublicKeys = [patientProfile.publicKey, professionalProfile.publicKey];
-            const encryptedBundle = await hybridEncrypt(fileBuffer, recipientPublicKeys);
+        try {
+            const fileBuffer = await file.arrayBuffer();
+            const recipientPublicKeys = [patientProfile.publicKey, professionalProfile.publicKey];
+            const encryptedBundle = await hybridEncrypt(fileBuffer, recipientPublicKeys);
 
-            toast.loading("Uploading encrypted bundle to IPFS...", { id: toastId });
-            const encryptedBundleBlob = new Blob([JSON.stringify(encryptedBundle)], { type: 'application/json' });
+            toast.loading("Uploading encrypted bundle to IPFS...", { id: toastId });
+            const encryptedBundleBlob = new Blob([JSON.stringify(encryptedBundle)], { type: 'application/json' });
+            
+            const formData = new FormData();
+            formData.append("file", encryptedBundleBlob, `encrypted-${Date.now()}.json`);
+            
+            const uploadResponse = await fetch('/api/upload', { method: 'POST', body: formData });
+            const uploadData = await uploadResponse.json();
+            if (!uploadResponse.ok) throw new Error(uploadData.error || 'Failed to upload encrypted bundle');
+            const bundleHash = uploadData.ipfsHash;
+
+            const metadata = {
+                title: title, // <-- Renamed from description
+                category: category,
+                fileType: file.type || 'application/octet-stream',
+                fileName: file.name,
+                encryptedBundleIPFSHash: bundleHash,
+            };
+
+            toast.loading("Uploading metadata to IPFS...", { id: toastId });
+            const metadataBlob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
+            const metadataFormData = new FormData();
+            metadataFormData.append("file", metadataBlob, `metadata-${Date.now()}.json`);
+            
+            const metadataUploadResponse = await fetch('/api/upload', { method: 'POST', body: metadataFormData });
+            const metadataUploadData = await metadataUploadResponse.json();
+            if (!metadataUploadResponse.ok) throw new Error(metadataUploadData.error || 'Failed to upload metadata');
+            const metadataHash = metadataUploadData.ipfsHash;
+            
+            // --- FINAL FIX ---
+            // 1. Extract the key bundles for patient and professional using their public keys.
+            const patientKeyBundle = encryptedBundle.encryptedSymmetricKeys[patientProfile.publicKey];
+            const professionalKeyBundle = encryptedBundle.encryptedSymmetricKeys[professionalProfile.publicKey];
+
+            if (!patientKeyBundle || !professionalKeyBundle) {
+                throw new Error("Encryption failed: Could not create encrypted keys for recipients.");
+            }
             
-            const formData = new FormData();
-            formData.append("file", encryptedBundleBlob, `encrypted-${Date.now()}.json`);
-            
-            const uploadResponse = await fetch('/api/upload', { method: 'POST', body: formData });
-            const uploadData = await uploadResponse.json();
-            if (!uploadResponse.ok) throw new Error(uploadData.error || 'Failed to upload encrypted bundle');
-            const bundleHash = uploadData.ipfsHash;
+            // 2. Stringify and encode each bundle to bytes, which the contract expects.
+            const patientKeyBytes = new TextEncoder().encode(JSON.stringify(patientKeyBundle));
+            const professionalKeyBytes = new TextEncoder().encode(JSON.stringify(professionalKeyBundle));
 
-            const metadata = {
-                description: description,
-                category: category,
-                fileType: file.type || 'application/octet-stream',
-                fileName: file.name,
-                encryptedBundleIPFSHash: bundleHash,
-            };
+            toast.loading("Adding verified record to blockchain...", { id: toastId });
+            
+            const tx = await contract.addVerifiedRecord(
+                patientProfile.walletAddress, 
+                metadataHash, 
+                title, 
+                category,
+                patientKeyBytes,
+                professionalKeyBytes
+            );
+            await tx.wait();
 
-            toast.loading("Uploading metadata to IPFS...", { id: toastId });
-            const metadataBlob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
-            const metadataFormData = new FormData();
-            metadataFormData.append("file", metadataBlob, `metadata-${Date.now()}.json`);
-            
-            const metadataUploadResponse = await fetch('/api/upload', { method: 'POST', body: metadataFormData });
-            const metadataUploadData = await metadataUploadResponse.json();
-            if (!metadataUploadResponse.ok) throw new Error(metadataUploadData.error || 'Failed to upload metadata');
-            const metadataHash = metadataUploadData.ipfsHash;
-            
-            toast.loading("Adding verified record to blockchain...", { id: toastId });
-            const tx = await contract.addVerifiedRecord(patientProfile.walletAddress, metadataHash, category);
-            await tx.wait();
+            toast.success("Verified record added successfully!", { id: toastId });
+            resetForm();
+            if (onUploadSuccess) onUploadSuccess();
 
-            toast.success("Verified record added successfully!", { id: toastId });
-            resetForm();
-            if (onUploadSuccess) onUploadSuccess();
+        } catch (error) {
+            console.error("Upload failed:", error);
+            toast.error(error.message || "An error occurred during upload.", { id: toastId });
+        } finally {
+            setIsUploading(false);
+        }
+    };
 
-        } catch (error) {
-            console.error("Upload failed:", error);
-            toast.error(error.message || "An error occurred during upload.", { id: toastId });
-        } finally {
-            setIsUploading(false);
-        }
-    };
-
-    return (
-        <div className="w-full p-8 mt-8 bg-white rounded-xl shadow-md border border-slate-200">
-            <h3 className="text-xl font-bold text-slate-800 mb-1">Upload Verified Record for <span className="text-teal-600">{patientProfile.name}</span></h3>
-            <p className="text-slate-500 mb-6">This record will be encrypted and marked as verified by you.</p>
-            <form onSubmit={handleSubmit} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <label htmlFor="description" className="block text-sm font-medium text-slate-700 mb-2">Record Description</label>
-                        <input type="text" id="description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g., Annual Blood Test Results" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" required />
-                    </div>
-                    <div>
-                        <label htmlFor="category" className="block text-sm font-medium text-slate-700 mb-2">Category</label>
-                        <select id="category" value={category} onChange={(e) => setCategory(e.target.value)} className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white">
-                            {allowedCategories.map(cat => (
-                                <option key={cat.value} value={cat.value}>{cat.label}</option>
-                            ))}
-                        </select>
-                    </div>
-                </div>
-                <div>
-                    {!file ? (
-                        <div onDrop={handleDrop} onDragOver={handleDrag} onDragEnter={handleDragEnter} onDragLeave={handleDragLeave} className={`relative block w-full px-12 py-10 text-center border-2 border-dashed rounded-lg cursor-pointer ${isDragActive ? 'border-teal-500 bg-teal-50' : 'border-slate-300 hover:border-slate-400'} transition-colors`}>
-                            <UploadCloudIcon />
-                            <span className="mt-2 block text-sm font-semibold text-slate-900">Drag and drop file here</span>
-                            <span className="mt-1 block text-xs text-slate-500">or click to browse</span>
-                            <input type="file" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleChange} />
-                        </div>
-                    ) : (
-                        <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-lg">
-                            <div className="flex items-center gap-3"><FileIcon /> <span className="text-sm font-medium text-slate-800">{file.name}</span></div>
-                            <button type="button" onClick={() => setFile(null)} className="p-1 text-slate-500 rounded-full hover:bg-slate-200 hover:text-slate-800 transition-colors"><CloseIcon /></button>
-                        </div>
-                    )}
-                </div>
-                <button type="submit" disabled={isUploading || !file || !description} className="w-full px-4 py-3 font-bold text-white bg-teal-600 rounded-lg hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:bg-slate-400 transition-colors shadow-lg">
-                    {isUploading ? 'Processing...' : 'Encrypt & Upload Record'}
-                </button>
-            </form>
-        </div>
-    );
+    return (
+        <div className="w-full p-8 mt-8 bg-white rounded-xl shadow-md border border-slate-200">
+            <h3 className="text-xl font-bold text-slate-800 mb-1">Upload Verified Record for <span className="text-teal-600">{patientProfile.name}</span></h3>
+            <p className="text-slate-500 mb-6">This record will be encrypted and marked as verified by you.</p>
+            <form onSubmit={handleSubmit} className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label htmlFor="title" className="block text-sm font-medium text-slate-700 mb-2">Record Title</label>
+                        <input type="text" id="title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g., Annual Blood Test Results" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" required />
+                    </div>
+                    <div>
+                        <label htmlFor="category" className="block text-sm font-medium text-slate-700 mb-2">Category</label>
+                        <select id="category" value={category} onChange={(e) => setCategory(e.target.value)} className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white">
+                            {allowedCategories.map(cat => (
+                                <option key={cat.value} value={cat.value}>{cat.label}</option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    {!file ? (
+                        <div onDrop={handleDrop} onDragOver={handleDrag} onDragEnter={handleDragEnter} onDragLeave={handleDragLeave} className={`relative block w-full px-12 py-10 text-center border-2 border-dashed rounded-lg cursor-pointer ${isDragActive ? 'border-teal-500 bg-teal-50' : 'border-slate-300 hover:border-slate-400'} transition-colors`}>
+                            <UploadCloudIcon />
+                            <span className="mt-2 block text-sm font-semibold text-slate-900">Drag and drop file here</span>
+                            <span className="mt-1 block text-xs text-slate-500">or click to browse</span>
+                            <input type="file" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleChange} />
+                        </div>
+                    ) : (
+                        <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                            <div className="flex items-center gap-3"><FileIcon /> <span className="text-sm font-medium text-slate-800">{file.name}</span></div>
+                            <button type="button" onClick={() => setFile(null)} className="p-1 text-slate-500 rounded-full hover:bg-slate-200 hover:text-slate-800 transition-colors"><CloseIcon /></button>
+                        </div>
+                    )}
+                </div>
+                <button type="submit" disabled={isUploading || !file || !title} className="w-full px-4 py-3 font-bold text-white bg-teal-600 rounded-lg hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:bg-slate-400 transition-colors shadow-lg">
+                    {isUploading ? 'Processing...' : 'Encrypt & Upload Record'}
+                </button>
+            </form>
+        </div>
+    );
 }
+
+
 
