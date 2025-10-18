@@ -16,7 +16,7 @@ export default function UploadForm() {
     const [file, setFile] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
     const [isDragActive, setIsDragActive] = useState(false);
-    const [description, setDescription] = useState('');
+    const [title, setTitle] = useState(''); // <-- MODIFIED: from description to title
     const [category, setCategory] = useState('lab-result');
 
     const handleDrop = useCallback((e) => { e.preventDefault(); e.stopPropagation(); setIsDragActive(false); if (e.dataTransfer.files?.[0]) { setFile(e.dataTransfer.files[0]); } }, []);
@@ -27,8 +27,8 @@ export default function UploadForm() {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!file || !description || !category) {
-            toast.error("Please provide a file, description, and category.");
+        if (!file || !title || !category) { // <-- MODIFIED: check for title
+            toast.error("Please provide a file, title, and category.");
             return;
         }
         if (!contract || !keyPair || !userProfile?.publicKey) {
@@ -55,7 +55,7 @@ export default function UploadForm() {
             const bundleHash = uploadData.ipfsHash;
 
             const metadata = {
-                description: description,
+                title: title, // <-- MODIFIED: from description
                 category: category,
                 fileType: file.type || 'application/octet-stream',
                 fileName: file.name,
@@ -73,14 +73,14 @@ export default function UploadForm() {
             const metadataHash = metadataUploadData.ipfsHash;
             
             toast.loading("Adding record to blockchain...", { id: toastId });
-            const tx = await contract.addSelfUploadedRecord(metadataHash, category);
+            // --- MODIFIED CONTRACT CALL ---
+            const tx = await contract.addSelfUploadedRecord(metadataHash, title, category); // Pass title
             await tx.wait();
 
             toast.success("Record added successfully!", { id: toastId });
             setFile(null);
-            setDescription('');
+            setTitle(''); // <-- MODIFIED: reset title
             setCategory('lab-result');
-            // REMOVED: The unreliable manual refresh call. The event listener in Web3Context will now handle this.
 
         } catch (error) {
             console.error("Upload failed:", error);
@@ -97,8 +97,9 @@ export default function UploadForm() {
             <form onSubmit={handleSubmit} className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                        <label htmlFor="description" className="block text-sm font-medium text-slate-700 mb-2">Record Description</label>
-                        <input type="text" id="description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g., Annual Blood Test Results" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" required />
+                        {/* --- MODIFIED INPUT FIELD --- */}
+                        <label htmlFor="title" className="block text-sm font-medium text-slate-700 mb-2">Record Title</label>
+                        <input type="text" id="title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g., Annual Blood Test Results" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" required />
                     </div>
                     <div>
                         <label htmlFor="category" className="block text-sm font-medium text-slate-700 mb-2">Category</label>
@@ -126,11 +127,10 @@ export default function UploadForm() {
                         </div>
                     )}
                 </div>
-                <button type="submit" disabled={isUploading || !file || !description} className="w-full px-4 py-3 font-bold text-white bg-teal-600 rounded-lg hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:bg-slate-400 transition-colors shadow-lg">
+                <button type="submit" disabled={isUploading || !file || !title} className="w-full px-4 py-3 font-bold text-white bg-teal-600 rounded-lg hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:bg-slate-400 transition-colors shadow-lg">
                     {isUploading ? 'Processing...' : 'Encrypt & Upload Record'}
                 </button>
             </form>
         </div>
     );
 }
-

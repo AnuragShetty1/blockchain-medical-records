@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const User = require('../../models/User');
 const RegistrationRequest = require('../../models/RegistrationRequest');
+const Record = require('../../models/Record'); // <-- IMPORT the Record model
 const logger = require('../../utils/logger');
 
 /**
@@ -12,25 +13,21 @@ const logger = require('../../utils/logger');
 router.get('/status/:address', async (req, res, next) => {
     try {
         const address = req.params.address.toLowerCase();
-
         const user = await User.findOne({ address });
 
         if (user) {
-            // User exists in our DB, return their detailed status
             return res.json({
                 success: true,
-                status: user.professionalStatus, // 'unaffiliated', 'pending', 'approved', 'revoked'
+                status: user.professionalStatus,
                 role: user.role,
                 isVerified: user.isVerified,
                 hospitalId: user.hospitalId,
                 requestedHospitalId: user.requestedHospitalId,
-                // [FIX] Include name and publicKey for frontend state synchronization
                 name: user.name,
                 publicKey: user.publicKey,
             });
         }
 
-        // Fallback for hospital admins who might not be in the Users collection initially
         const pendingRequest = await RegistrationRequest.findOne({
             requesterAddress: address,
             status: { $in: ['pending', 'verifying'] }
@@ -40,7 +37,6 @@ router.get('/status/:address', async (req, res, next) => {
             return res.json({ success: true, status: 'pending_verification' });
         }
 
-        // If no record found at all
         return res.json({ success: true, status: 'unregistered' });
 
     } catch (error) {
@@ -49,26 +45,21 @@ router.get('/status/:address', async (req, res, next) => {
     }
 });
 
-
 /**
  * @route   POST /api/users/request-association
  * @desc    Allows a professional to request affiliation with a hospital.
  * @access  Private (Authenticated User)
- * @todo    Add JWT authentication middleware
  */
 router.post('/request-association', async (req, res, next) => {
     try {
         const { address, name, role, requestedHospitalId } = req.body;
 
-        // --- THIS IS THE FIX ---
-        // The check is now more specific to handle a valid hospitalId of 0.
         if (!address || !name || role === undefined || role === null || requestedHospitalId === undefined || requestedHospitalId === null) {
             return res.status(400).json({ success: false, message: 'Missing required fields.' });
         }
 
         const lowerCaseAddress = address.toLowerCase();
 
-        // Find or create the user, then set their request details
         const updatedUser = await User.findOneAndUpdate(
             { address: lowerCaseAddress },
             {
@@ -78,8 +69,8 @@ router.post('/request-association', async (req, res, next) => {
                     role: role,
                     professionalStatus: 'pending',
                     requestedHospitalId: requestedHospitalId,
-                    isVerified: false, // Reset verification status on new request
-                    hospitalId: null, // Clear old hospital ID if re-applying
+                    isVerified: false,
+                    hospitalId: null,
                 }
             },
             { upsert: true, new: true }
@@ -120,8 +111,8 @@ router.post('/register-patient', async (req, res, next) => {
                     address: lowerCaseAddress,
                     name: name,
                     role: 'Patient',
-                    isVerified: true, // Patients are auto-verified
-                    professionalStatus: 'approved', // Patients are approved by default
+                    isVerified: true,
+                    professionalStatus: 'approved',
                 }
             },
             { upsert: true, new: true }
@@ -140,5 +131,30 @@ router.post('/register-patient', async (req, res, next) => {
     }
 });
 
+/**
+ * @route   GET /api/users/records/patient/:address
+ * @desc    Get all records for a specific patient, with optional search.
+ * @access  Public (should be protected later)
+ */
+router.get('/records/patient/:address', async (req, res, next) => {
+    try {
+        const { address } = req.params;
+        const { q } = req.query; // Search query for title
+
+        let query = { owner: address.toLowerCase() };
+
+        if (q) {
+            // Using a case-insensitive regex for a flexible substring search
+            query.title = { $regex: q, $options: 'i' };
+        }
+
+        const records = await Record.find(query).sort({ timestamp: -1 });
+
+        res.json({ success: true, data: records });
+    } catch (error) {
+        logger.error(`Error fetching records for patient ${req.params.address}:`, error);
+        next(error);
+    }
+});
 
 module.exports = router;

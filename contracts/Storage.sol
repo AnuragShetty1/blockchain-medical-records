@@ -12,10 +12,8 @@ abstract contract Storage {
 
     // --- DATA STRUCTURES ---
 
-    // [MODIFIED] Added SuperAdmin role.
     enum Role { Patient, Doctor, HospitalAdmin, InsuranceProvider, Pharmacist, Researcher, Guardian, LabTechnician, SuperAdmin }
 
-    // Represents a registered user in the system.
     struct User {
         address walletAddress;
         string name;
@@ -24,31 +22,27 @@ abstract contract Storage {
         string publicKey;
     }
 
-    // Stores additional profile information for a user.
     struct UserProfile {
         string name;
         string contactInfo;
         string profileMetadataURI;
     }
 
-    // Represents a single medical record.
     struct Record {
         uint256 id;
+        string title; // For search and display via indexer.
         string ipfsHash;
         uint256 timestamp;
         address uploadedBy;
         address owner;
         bool isVerified;
         string category;
-        // [NEW] Fields for encrypted symmetric keys for the new encryption flow
         bytes encryptedKeyForPatient;
         bytes encryptedKeyForHospital;
     }
 
-    // Defines the status of an access request.
     enum RequestStatus { Pending, Approved, Rejected }
 
-    // Represents a request for access, typically from an insurance provider for a claim.
     struct AccessRequest {
         uint256 id;
         address patient;
@@ -57,7 +51,6 @@ abstract contract Storage {
         RequestStatus status;
     }
     
-    // [NEW] Struct to store hospital data.
     struct Hospital {
         uint256 hospitalId;
         string name;
@@ -65,7 +58,6 @@ abstract contract Storage {
         bool isVerified;
     }
     
-    // [NEW] Struct for hospital registration requests.
     struct RegistrationRequest {
         uint256 hospitalId;
         string name;
@@ -95,7 +87,6 @@ abstract contract Storage {
     mapping(uint256 => RegistrationRequest) public registrationRequests;
     mapping(address => uint256) public userToHospital; // userAddress => hospitalId
     
-    // [NEW] Mapping to link professionals directly to their hospital ID on-chain for the new affiliation workflow
     mapping(address => uint256) public professionalToHospitalId;
 }
 

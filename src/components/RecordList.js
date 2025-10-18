@@ -5,20 +5,12 @@ import { useWeb3 } from '@/context/Web3Context';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { hybridDecrypt } from '@/utils/crypto';
-import AccessManager from './AccessManager';
-
-// --- CONFIGURATION ---
-const CONCURRENT_FETCH_LIMIT = 3;
-const IPFS_GATEWAY = 'https://ipfs.io';
+import axios from 'axios';
 
 // --- ICONS ---
-const ViewIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.432 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>;
-const ShareIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.186 2.25 2.25 0 00-3.933 2.186z" /></svg>;
-const SpinnerIcon = () => <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>;
-const Spinner = () => <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-slate-500"></div>;
-const CheckSquareIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
-const CloseIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>;
-
+const ViewIcon = () => <svg className="w-5 h-5" xmlns="http://www.w.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.432 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>;
+const SpinnerIcon = () => <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>;
+const Spinner = () => <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-500"></div>;
 
 // Helper to get category styles
 const getCategoryStyle = (category) => {
@@ -31,293 +23,142 @@ const getCategoryStyle = (category) => {
     }
 };
 
-export default function RecordList() {
-    const { account, records: patientRecords, keyPair, isLoadingProfile } = useWeb3();
-    const [recordsWithMetadata, setRecordsWithMetadata] = useState([]);
-    const [isFetchingMetadata, setIsFetchingMetadata] = useState(true);
+export default function RecordList({ searchQuery }) {
+    const { account, keyPair } = useWeb3();
+    const [records, setRecords] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
     const [decryptionStates, setDecryptionStates] = useState({});
 
-    // --- STATE FOR BULK SHARING ---
-    const [isShareModalOpen, setIsShareModalOpen] = useState(false);
-    const [recordsToShare, setRecordsToShare] = useState([]);
-    const [selectionMode, setSelectionMode] = useState(false);
-    const [selectedRecordIds, setSelectedRecordIds] = useState(new Set());
-
-    const handleToggleSelectionMode = () => {
-        setSelectionMode(!selectionMode);
-        setSelectedRecordIds(new Set()); // Clear selection when toggling mode
-    };
-
-    const handleRecordSelect = (recordId) => {
-        const newSelection = new Set(selectedRecordIds);
-        if (newSelection.has(recordId)) {
-            newSelection.delete(recordId);
-        } else {
-            newSelection.add(recordId);
-        }
-        setSelectedRecordIds(newSelection);
-    };
-
-    const handleOpenShareModal = (records) => {
-        setRecordsToShare(Array.isArray(records) ? records : [records]);
-        setIsShareModalOpen(true);
-    };
-
-    const handleCloseShareModal = () => {
-        setIsShareModalOpen(false);
-        setRecordsToShare([]);
-        // Exit selection mode after sharing is complete
-        setSelectionMode(false);
-        setSelectedRecordIds(new Set());
-    };
-
-    const getSelectedRecords = () => {
-        return recordsWithMetadata.filter(r => selectedRecordIds.has(r.id));
-    };
-    
-    // This useEffect hook for fetching data remains unchanged.
     useEffect(() => {
-        // ... (existing fetch logic is correct and remains here)
-        const controller = new AbortController();
-        const signal = controller.signal;
+        const fetchRecords = async () => {
+            if (!account) return;
 
-        const processQueue = async (items, asyncProcess, onProgress) => {
-             let activePromises = 0;
-            const queue = [...items];
-
-            return new Promise((resolve, reject) => {
-                const processNext = () => {
-                    if (queue.length === 0 && activePromises === 0) {
-                        resolve();
-                        return;
-                    }
-                    while (activePromises < CONCURRENT_FETCH_LIMIT && queue.length > 0) {
-                        activePromises++;
-                        const item = queue.shift();
-                        asyncProcess(item)
-                            .then(result => {
-                                if (!signal.aborted && result) {
-                                    onProgress(result);
-                                }
-                            })
-                            .catch(error => {
-                                if (error.name !== 'AbortError') {
-                                    console.error("Error in queue processing:", error);
-                                }
-                            })
-                            .finally(() => {
-                                activePromises--;
-                                processNext();
-                            });
-                    }
-                };
-                processNext();
-            });
-        };
-        
-        const fetchAndProcessRecord = async (record) => {
-            const recordData = {
-                id: Number(record[0]),
-                metadataIPFSHash: String(record[1]),
-                timestamp: Number(record[2]),
-                patient: record[3],
-                uploadedBy: record[4],
-                isVerified: record[5],
-                category: record[6],
-            };
-            
-            const metadataUrl = `${IPFS_GATEWAY}/ipfs/${recordData.metadataIPFSHash}`;
-            
+            setIsLoading(true);
             try {
-                const response = await fetch(metadataUrl, { signal });
-                if (!response.ok) throw new Error(`Gateway returned HTTP ${response.status}`);
-                const metadata = await response.json();
-                return { ...recordData, metadata };
-            } catch (error) {
-                if (error.name !== 'AbortError') {
-                    console.error(`FAILED to fetch metadata for record ID: ${recordData.id}.`, error);
-                    return { ...recordData, metadata: { description: "Error: Could not load metadata.", fileName: "Unknown" } };
+                const params = {};
+                if (searchQuery) {
+                    params.q = searchQuery;
                 }
-                return null;
+                // Ensure your backend is running on port 3001
+                const response = await axios.get(`http://localhost:3001/api/users/records/patient/${account}`, { params });
+                
+                if (response.data.success) {
+                    setRecords(response.data.data || []);
+                } else {
+                    toast.error("Could not load your records.");
+                    setRecords([]);
+                }
+            } catch (error) {
+                console.error("Failed to fetch records from backend:", error);
+                toast.error("Could not connect to the server to get records.");
+            } finally {
+                setIsLoading(false);
             }
         };
 
-        const fetchAllMetadata = async () => {
-            if (isLoadingProfile || !patientRecords) return;
-            
-            setIsFetchingMetadata(true);
-            setRecordsWithMetadata([]);
+        // Debounce API calls to avoid spamming while the user types
+        const debounceFetch = setTimeout(() => {
+            fetchRecords();
+        }, 300);
 
-            const validPatientRecords = patientRecords.filter(r => r && r[1] && typeof r[1] === 'string' && r[1].length > 0);
+        return () => clearTimeout(debounceFetch);
 
-            if (validPatientRecords.length === 0) {
-                if (!signal.aborted) setIsFetchingMetadata(false);
-                return;
-            }
+    }, [account, searchQuery]);
 
-            const handleProgress = (newlyFetchedRecord) => {
-                setRecordsWithMetadata(prev => {
-                    if (prev.some(r => r.id === newlyFetchedRecord.id)) return prev;
-                    return [...prev, newlyFetchedRecord].sort((a, b) => b.timestamp - a.timestamp);
-                });
-            };
-
-            await processQueue(validPatientRecords, fetchAndProcessRecord, handleProgress);
-            
-            if (!signal.aborted) setIsFetchingMetadata(false);
-        };
-
-        fetchAllMetadata();
-
-        return () => {
-            controller.abort();
-        };
-    }, [isLoadingProfile, patientRecords]);
-
-
-    const handleDecryptAndView = async (record, index) => {
-        // ... (existing decrypt logic is correct and remains here)
+    const handleDecryptAndView = async (record) => {
         if (!keyPair?.privateKey) {
-            toast.error("Private key not available. Cannot decrypt.");
+            toast.error("Your security key is not available. Cannot decrypt.");
             return;
         }
-        setDecryptionStates(prev => ({ ...prev, [index]: 'pending' }));
-        const toastId = toast.loading("Fetching encrypted data bundle...");
-        try {
-            const bundleHash = record.metadata.encryptedBundleIPFSHash;
-            if (!bundleHash) throw new Error("Invalid metadata: Bundle hash missing.");
-            
-            const bundleUrl = `${IPFS_GATEWAY}/ipfs/${bundleHash}`;
-            const response = await fetch(bundleUrl);
-            if (!response.ok) throw new Error("Could not fetch encrypted bundle from IPFS.");
-            const encryptedBundle = await response.json();
 
-            toast.loading("Decrypting file in browser...", { id: toastId });
+        setDecryptionStates(prev => ({ ...prev, [record.recordId]: 'pending' }));
+        const toastId = toast.loading("Fetching encrypted data...");
+
+        try {
+            // Step 1: Fetch the metadata file from IPFS
+            const metadataUrl = `https://ipfs.io/ipfs/${record.ipfsHash}`;
+            const metaResponse = await fetch(metadataUrl);
+            if (!metaResponse.ok) throw new Error('Could not fetch record metadata from IPFS.');
+            const metadata = await metaResponse.json();
+
+            // Step 2: Get the encrypted file's hash from the metadata
+            const bundleHash = metadata.encryptedBundleIPFSHash;
+            if (!bundleHash) throw new Error("Invalid metadata: Encrypted file hash is missing.");
+            
+            // Step 3: Fetch the actual encrypted file bundle from IPFS
+            const bundleUrl = `https://ipfs.io/ipfs/${bundleHash}`;
+            const bundleResponse = await fetch(bundleUrl);
+            if (!bundleResponse.ok) throw new Error("Could not fetch encrypted file from IPFS.");
+            const encryptedBundle = await bundleResponse.json();
+
+            // Step 4: Decrypt the file in the browser
+            toast.loading("Decrypting file...", { id: toastId });
             const decryptedData = await hybridDecrypt(encryptedBundle, keyPair.privateKey);
 
-            const blob = new Blob([decryptedData], { type: record.metadata.fileType });
+            // Step 5: Create a Blob and open it in a new tab
+            const blob = new Blob([decryptedData], { type: metadata.fileType || 'application/octet-stream' });
             const url = window.URL.createObjectURL(blob);
             window.open(url, '_blank');
-            window.URL.revokeObjectURL(url);
+            window.URL.revokeObjectURL(url); // Clean up the object URL
+
             toast.success("File decrypted successfully!", { id: toastId });
-            setDecryptionStates(prev => ({ ...prev, [index]: 'success' }));
+            setDecryptionStates(prev => ({ ...prev, [record.recordId]: 'success' }));
         } catch (error) {
             console.error("Decryption failed:", error);
-            toast.error(error.message || "An error occurred during decryption.", { id: toastId });
-            setDecryptionStates(prev => ({ ...prev, [index]: 'error' }));
+            toast.error(error.message, { id: toastId });
+            setDecryptionStates(prev => ({ ...prev, [record.recordId]: 'error' }));
         }
     };
 
-    if (isLoadingProfile || (isFetchingMetadata && recordsWithMetadata.length === 0)) {
+    if (isLoading) {
         return (
-            <div className="flex justify-center items-center p-12 bg-slate-50 rounded-lg">
+            <div className="flex flex-col justify-center items-center p-12 bg-slate-50 rounded-lg h-64">
                 <Spinner />
-                <p className="ml-4 text-slate-500">Loading your records...</p>
+                <p className="mt-4 text-slate-500 font-semibold">Loading your records...</p>
             </div>
         );
     }
 
-    if (!isFetchingMetadata && (!recordsWithMetadata || recordsWithMetadata.length === 0)) {
-        return <div className="text-center p-8 text-slate-500 bg-slate-50 rounded-lg">You have not uploaded any medical records yet.</div>;
+    if (records.length === 0) {
+        return (
+            <div className="text-center p-12 bg-slate-50 rounded-lg">
+                <p className="font-semibold text-slate-600">No records found.</p>
+                <p className="text-sm text-slate-500 mt-2">
+                    {searchQuery ? "Try adjusting your search." : "Upload a record to get started."}
+                </p>
+            </div>
+        );
     }
 
     return (
-        <>
-            <div className="w-full bg-white rounded-xl shadow-md border border-slate-200">
-                <div className="p-6 border-b border-slate-200 flex justify-between items-center">
-                    <div>
-                        <h3 className="text-xl font-bold text-slate-800">Your Medical Records</h3>
-                        <p className="text-slate-500 mt-1">These records are encrypted and securely stored on IPFS.</p>
+        <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl shadow-sm">
+            {records.map((record) => (
+                <div key={record.recordId} className="flex items-center justify-between p-4 hover:bg-slate-50 transition-colors">
+                    <div className="flex items-center gap-4 flex-1 min-w-0">
+                        <div className={`flex-shrink-0 w-12 h-12 rounded-lg flex items-center justify-center text-2xl ${getCategoryStyle(record.category).color}`}>
+                            {getCategoryStyle(record.category).icon}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-md text-slate-800 truncate" title={record.title}>
+                                {record.title}
+                            </p>
+                            <p className="text-sm text-slate-500 mt-1">
+                                Uploaded on: {format(new Date(record.timestamp), "PPpp")}
+                            </p>
+                        </div>
                     </div>
-                    <button
-                        onClick={handleToggleSelectionMode}
-                        className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-colors shadow-sm ${
-                            selectionMode ? 'bg-slate-200 text-slate-800' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50'
-                        }`}
-                    >
-                        {selectionMode ? <CloseIcon /> : <CheckSquareIcon />}
-                        {selectionMode ? 'Cancel' : 'Select'}
-                    </button>
-                </div>
-                <div className="divide-y divide-slate-200">
-                    {recordsWithMetadata.map((record, index) => {
-                        const isSelected = selectedRecordIds.has(record.id);
-                        return (
-                            <div key={record.id} className={`flex items-start justify-between p-4 transition-colors ${isSelected ? 'bg-teal-50' : 'hover:bg-slate-50'}`}>
-                                <div className="flex items-start gap-4 flex-1 min-w-0">
-                                    {selectionMode && (
-                                        <input
-                                            type="checkbox"
-                                            checked={isSelected}
-                                            onChange={() => handleRecordSelect(record.id)}
-                                            className="mt-1 h-5 w-5 rounded border-gray-300 text-teal-600 focus:ring-teal-500 cursor-pointer"
-                                        />
-                                    )}
-                                    <div className={`flex-shrink-0 w-12 h-12 rounded-lg flex items-center justify-center text-2xl ${getCategoryStyle(record.metadata?.category).color}`}>
-                                        {getCategoryStyle(record.metadata?.category).icon}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                         {/* ... record details ... */}
-                                         <p className="font-semibold text-md text-slate-800 truncate" title={record.metadata?.description}>
-                                             {record.metadata?.description || "No description provided"}
-                                         </p>
-                                         <p className="text-sm text-slate-500 mt-1 truncate" title={record.metadata?.fileName}>
-                                             File: {record.metadata?.fileName || "Unknown"}
-                                         </p>
-                                         <p className="text-xs text-slate-400 mt-2">
-                                             Uploaded: {record.timestamp ? format(new Date(record.timestamp * 1000), "PPpp") : 'N/A'}
-                                         </p>
-                                    </div>
-                                </div>
-                                {!selectionMode && (
-                                <div className="flex items-center gap-2 mt-4 md:mt-0 md:ml-4 flex-shrink-0">
-                                    <button
-                                        onClick={() => handleOpenShareModal(record)}
-                                        className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
-                                    >
-                                        <ShareIcon />
-                                        Share
-                                    </button>
-                                    <button
-                                        onClick={() => handleDecryptAndView(record, index)}
-                                        disabled={decryptionStates[index] === 'pending' || !keyPair}
-                                        className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-slate-400 transition-colors shadow"
-                                    >
-                                        {decryptionStates[index] === 'pending' ? <SpinnerIcon /> : <ViewIcon />}
-                                        {decryptionStates[index] === 'pending' ? 'Processing...' : 'Decrypt & View'}
-                                    </button>
-                                </div>
-                                )}
-                            </div>
-                        )
-                    })}
-                </div>
-            </div>
-
-            {/* --- FLOATING ACTION BAR --- */}
-            {selectionMode && selectedRecordIds.size > 0 && (
-                 <div className="fixed bottom-10 left-1/2 -translate-x-1/2 w-full max-w-md z-40 animate-fade-in-up">
-                    <div className="bg-slate-800 text-white rounded-xl shadow-2xl p-4 flex justify-between items-center mx-4">
-                        <p className="font-semibold">{selectedRecordIds.size} record(s) selected</p>
-                        <button
-                            onClick={() => handleOpenShareModal(getSelectedRecords())}
-                            className="flex items-center gap-2 px-4 py-2 font-bold text-slate-800 bg-teal-400 rounded-lg hover:bg-teal-300 transition-colors"
+                    <div className="flex items-center gap-2 ml-4">
+                         <button
+                            onClick={() => handleDecryptAndView(record)}
+                            disabled={decryptionStates[record.recordId] === 'pending' || !keyPair}
+                            className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-slate-400 transition-colors shadow-sm"
                         >
-                            <ShareIcon />
-                            Share Selected
+                            {decryptionStates[record.recordId] === 'pending' ? <SpinnerIcon /> : <ViewIcon />}
+                            View
                         </button>
                     </div>
                 </div>
-            )}
-
-            {/* --- RENDER THE MODAL CONDITIONALLY --- */}
-            {isShareModalOpen && (
-                <AccessManager 
-                    records={recordsToShare}
-                    onClose={handleCloseShareModal}
-                />
-            )}
-        </>
+            ))}
+        </div>
     );
 }
-

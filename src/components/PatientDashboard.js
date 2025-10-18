@@ -9,6 +9,7 @@ import UploadForm from "./UploadForm";
 import AccessManager from "./AccessManager";
 import RequestManager from "./RequestManager";
 import Profile from "./Profile";
+import RecordList from "./RecordList"; // <-- IMPORT RecordList
 
 // --- ICONS (kept within the component for encapsulation) ---
 const DashboardIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>;
@@ -24,6 +25,7 @@ export default function PatientDashboard() {
     const { userProfile, records, requests, accessList } = useWeb3();
     const [activeView, setActiveView] = useState('dashboard');
     const [greeting, setGreeting] = useState('Welcome');
+    const [searchQuery, setSearchQuery] = useState(''); // <-- ADD search query state
 
     useEffect(() => {
         const hour = new Date().getHours();
@@ -33,11 +35,18 @@ export default function PatientDashboard() {
     }, []);
     
     const handleCopyAddress = () => {
-        navigator.clipboard.writeText(userProfile.walletAddress).then(() => {
+        // Using document.execCommand for better iframe compatibility
+        const textArea = document.createElement("textarea");
+        textArea.value = userProfile.walletAddress;
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+            document.execCommand('copy');
             toast.success('Address copied to clipboard!');
-        }, () => {
+        } catch (err) {
             toast.error('Failed to copy address.');
-        });
+        }
+        document.body.removeChild(textArea);
     };
 
     const renderContent = () => {
@@ -49,6 +58,18 @@ export default function PatientDashboard() {
                     <div className="p-8 bg-white rounded-2xl shadow-xl border border-slate-200">
                         <h2 className="text-3xl font-bold text-slate-800 mb-6">My Records</h2>
                         <UploadForm />
+                        {/* --- NEW SEARCH AND LIST SECTION --- */}
+                        <div className="mt-8 pt-8 border-t border-slate-200">
+                             <h3 className="text-2xl font-bold text-slate-800 mb-6">My Record History</h3>
+                            <input 
+                                type="text"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                placeholder="Search records by title..."
+                                className="w-full px-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500 transition mb-6"
+                            />
+                            <RecordList searchQuery={searchQuery} />
+                        </div>
                     </div>
                 );
             case 'access':
@@ -67,10 +88,10 @@ export default function PatientDashboard() {
                 );
             case 'profile':
                 return (
-                     <div className="p-8 bg-white rounded-2xl shadow-xl border border-slate-200">
-                        <h2 className="text-3xl font-bold text-slate-800 mb-6">My Profile</h2>
-                        <Profile />
-                    </div>
+                       <div className="p-8 bg-white rounded-2xl shadow-xl border border-slate-200">
+                           <h2 className="text-3xl font-bold text-slate-800 mb-6">My Profile</h2>
+                           <Profile />
+                       </div>
                 );
             default:
                 return <DashboardOverview records={records || []} accessList={accessList || []} requests={requests || []} />;
@@ -233,4 +254,3 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
         </ul>
     );
 };
-

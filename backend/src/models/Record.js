@@ -7,29 +7,41 @@ const recordSchema = new mongoose.Schema({
         unique: true,
         index: true,
     },
-    patientAddress: {
+    owner: { // <-- RENAMED from patientAddress to match event
         type: String,
         required: true,
         lowercase: true,
         index: true,
     },
+    title: { // <-- ADDED
+        type: String,
+        required: true,
+        index: true 
+    },
     ipfsHash: {
         type: String,
         required: true,
+    },
+    category: { // <-- ADDED
+        type: String,
+    },
+    isVerified: { // <-- ADDED
+        type: Boolean,
+        default: false,
     },
     uploadedBy: {
         type: String,
         required: true,
         lowercase: true,
     },
-    // [NEW] Store encrypted keys in the database
-    encryptedKeyForPatient: {
-        type: String, // Storing as hex string
+    timestamp: { // <-- ADDED
+        type: Date,
+        required: true,
     },
-    encryptedKeyForHospital: {
-        type: String, // Storing as hex string
-    }
 }, { timestamps: true });
+
+// For text search functionality on the title
+recordSchema.index({ title: 'text' });
 
 const Record = mongoose.model('Record', recordSchema);
 

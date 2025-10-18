@@ -7,9 +7,6 @@ import "./AccessControl.sol";
 /**
  * @title MedicalRecords
  * @dev The main entry point contract for the application.
- * It combines all logic from parent contracts (AccessControl, Roles) and
- * manages the creation and retrieval of medical records.
- * It is UUPS-upgradeable.
  */
 contract MedicalRecords is AccessControl, UUPSUpgradeable {
 
@@ -18,17 +15,11 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
         _disableInitializers();
     }
 
-    /**
-     * @dev Initializes the entire contract chain and sets the initial owner.
-     */
     function initialize(address initialOwner) public initializer {
         __AccessControl_init(initialOwner);
         __UUPSUpgradeable_init();
     }
     
-    /**
-     * @dev Required by UUPS for upgrade authorization. Restricts upgrades to the owner.
-     */
     function _authorizeUpgrade(address newImplementation)
         internal
         onlyOwner
@@ -38,12 +29,13 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
     // --- EVENTS ---
     event RecordAdded(
         uint256 indexed recordId,
-        address indexed patient,
-        address indexed uploadedBy,
+        address indexed owner,
+        string title,
+        string ipfsHash,
         string category,
         bool isVerified,
-        bytes encryptedKeyForPatient,
-        bytes encryptedKeyForHospital
+        address uploadedBy,
+        uint256 timestamp
     );
 
 
@@ -51,32 +43,32 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
 
     /**
      * @dev Allows a patient to add a self-uploaded, non-verified medical record.
-     * For self-uploads, both encrypted keys are intended for the patient.
      */
     function addSelfUploadedRecord(
         string memory _ipfsHash,
-        string memory _category,
-        bytes memory _encryptedKeyForPatient
+        string memory _title,
+        string memory _category
     ) public {
         if (users[msg.sender].role != Role.Patient) { revert NotAPatient(); }
         
         _createRecord(
             msg.sender,
             _ipfsHash,
+            _title, // Pass title to internal function
             _category,
             false,
-            _encryptedKeyForPatient,
-            _encryptedKeyForPatient // For self-upload, hospital key is just a copy for the patient
+            bytes(""), // Pass empty bytes for patient key (no longer used in this flow)
+            bytes("")  // Pass empty bytes for hospital key (no longer used in this flow)
         );
     }
 
     /**
-     * @dev Allows a verified professional (Doctor, LabTechnician) to add a verified record
-     * on behalf of a patient, including separate encrypted keys for patient and hospital.
+     * @dev Allows a verified professional to add a verified record for a patient.
      */
     function addVerifiedRecord(
         address _patient,
         string memory _ipfsHash,
+        string memory _title,
         string memory _category,
         bytes memory _encryptedKeyForPatient,
         bytes memory _encryptedKeyForHospital
@@ -95,6 +87,7 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
         _createRecord(
             _patient,
             _ipfsHash,
+            _title,
             _category,
             true,
             _encryptedKeyForPatient,
@@ -104,11 +97,11 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
 
     /**
      * @dev Internal function to handle the creation and storage of a new record.
-     * Grants permanent access to both the owner (patient) and the uploader.
      */
     function _createRecord(
         address _patient,
         string memory _ipfsHash,
+        string memory _title,
         string memory _category,
         bool _isVerified,
         bytes memory _encryptedKeyForPatient,
@@ -118,6 +111,7 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
         
         records.push(Record({
             id: recordId,
+            title: _title, // <-- Set the title here
             ipfsHash: _ipfsHash,
             timestamp: block.timestamp,
             uploadedBy: msg.sender,
@@ -130,11 +124,19 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
 
         patientRecordIds[_patient].push(recordId);
 
-        // Grant permanent access to the patient (owner) and the uploader
         recordAccess[recordId][_patient] = type(uint256).max;
         recordAccess[recordId][msg.sender] = type(uint256).max;
 
-        emit RecordAdded(recordId, _patient, msg.sender, _category, _isVerified, _encryptedKeyForPatient, _encryptedKeyForHospital);
+        emit RecordAdded(
+            recordId,
+            _patient,
+            _title,
+            _ipfsHash,
+            _category,
+            _isVerified,
+            msg.sender,
+            block.timestamp
+        );
     }
 
     // --- VIEW FUNCTIONS ---

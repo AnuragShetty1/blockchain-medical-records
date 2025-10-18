@@ -68,9 +68,6 @@ const startIndexer = (wss) => {
             );
             logger.info(`[Indexer] Saved/Updated hospital: ${hospitalName}`);
             
-            // --- [BUG FIX #2] ---
-            // The `hospitalId` field is now correctly added to the Hospital Admin's user record.
-            // This ensures their dashboard can fetch requests for the hospital they manage.
             await User.findOneAndUpdate(
                 { address: adminAddress.toLowerCase() }, 
                 { 
@@ -164,16 +161,10 @@ const startIndexer = (wss) => {
         }
     });
 
-    // --- [FIX APPLIED] ---
-    // Added the missing event listener for PublicKeySaved.
-    // This ensures that when a professional user completes their security setup,
-    // their public key is fetched from the contract and saved to the off-chain database.
-    // This resolves the core issue of professionals being stuck in the setup loop.
     contract.on('PublicKeySaved', async (userAddress, event) => {
         try {
             logger.info(`[Event] PublicKeySaved: for user ${userAddress}`);
             
-            // Retrieve the public key directly from the contract state to ensure data integrity
             const userOnChain = await contract.users(userAddress);
             const publicKey = userOnChain.publicKey;
 
@@ -196,19 +187,24 @@ const startIndexer = (wss) => {
         }
     });
     
-    contract.on('RecordAdded', async (recordId, patient, uploadedBy, category, isVerified, encryptedKeyForPatient, encryptedKeyForHospital, event) => {
+    // --- MODIFIED ---
+    // Updated listener to match the new RecordAdded event signature and data structure.
+    contract.on('RecordAdded', async (recordId, owner, title, ipfsHash, category, isVerified, verifiedBy, timestamp, event) => {
         try {
             const numericRecordId = Number(recordId);
-            logger.info(`[Event] RecordAdded: ID ${numericRecordId} for patient ${patient}`);
+            logger.info(`[Event] RecordAdded: ID ${numericRecordId} for owner ${owner}`);
 
             await Record.findOneAndUpdate(
                 { recordId: numericRecordId },
                 {
                     recordId: numericRecordId,
-                    patientAddress: patient.toLowerCase(),
-                    uploadedBy: uploadedBy.toLowerCase(),
-                    encryptedKeyForPatient: encryptedKeyForPatient,
-                    encryptedKeyForHospital: encryptedKeyForHospital
+                    owner: owner.toLowerCase(),
+                    title: title,
+                    ipfsHash: ipfsHash,
+                    category: category,
+                    isVerified: isVerified,
+                    uploadedBy: verifiedBy.toLowerCase(),
+                    timestamp: new Date(Number(timestamp) * 1000),
                 },
                 { upsert: true, new: true }
             );
@@ -222,4 +218,3 @@ const startIndexer = (wss) => {
 };
 
 module.exports = startIndexer;
-
