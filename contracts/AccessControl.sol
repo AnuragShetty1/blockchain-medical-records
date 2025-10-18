@@ -24,6 +24,7 @@ contract AccessControl is Roles {
     event AccessGranted(uint256 indexed recordId, address indexed owner, address indexed grantee, uint256 expiration, bytes encryptedDek);
     event RecordAccessRevoked(uint256 indexed recordId, address indexed professionalAddress);
     event AccessRequested(uint256 indexed requestId, address indexed patient, address indexed provider, string claimId);
+    event ProfessionalAccessRequested(uint256 indexed requestId, uint256[] recordIds, address indexed professional, address indexed patient);
     event RequestApproved(uint256 indexed requestId, address indexed patient, uint256 accessDuration);
 
     // Internal initializer to set up the parent contract chain.
@@ -146,6 +147,27 @@ contract AccessControl is Roles {
             }
         }
         if (!found) { revert RequestNotFound(); }
+    }
+
+    /**
+     * @dev Allows a verified professional (Doctor, Lab Technician) to request access to a patient's records.
+     * This function only emits an event; the request is handled off-chain by the indexer and backend.
+     */
+    function requestRecordAccess(address _patient, uint256[] calldata _recordIds) public {
+        User storage professional = users[msg.sender];
+        if (
+            (professional.role != Role.Doctor && professional.role != Role.LabTechnician) || !professional.isVerified
+        ) {
+            revert NotAVerifiedProfessional();
+        }
+
+        if (users[_patient].role != Role.Patient) {
+            revert NotAPatient();
+        }
+
+        uint256 requestId = _nextRequestId++;
+
+        emit ProfessionalAccessRequested(requestId, _recordIds, msg.sender, _patient);
     }
 
     // --- VIEW FUNCTIONS ---

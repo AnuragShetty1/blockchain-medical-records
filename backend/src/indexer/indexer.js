@@ -8,6 +8,7 @@ const Hospital = require('../models/Hospital');
 const RegistrationRequest = require('../models/RegistrationRequest');
 const User = require('../models/User');
 const Record = require('../models/Record');
+const AccessRequest = require('../models/AccessRequest');
 
 const startIndexer = (wss) => {
 
@@ -187,8 +188,6 @@ const startIndexer = (wss) => {
         }
     });
     
-    // --- MODIFIED ---
-    // Updated listener to match the new RecordAdded event signature and data structure.
     contract.on('RecordAdded', async (recordId, owner, title, ipfsHash, category, isVerified, verifiedBy, timestamp, event) => {
         try {
             const numericRecordId = Number(recordId);
@@ -211,6 +210,29 @@ const startIndexer = (wss) => {
             logger.info(`[Indexer] Saved record metadata for ID ${numericRecordId}.`);
         } catch(error) {
             logger.error(`Error processing RecordAdded event: ${error.message}`);
+        }
+    });
+
+    contract.on('ProfessionalAccessRequested', async (requestId, recordIds, professional, patient, event) => {
+        try {
+            const numericRequestId = Number(requestId);
+            const numericRecordIds = recordIds.map(id => Number(id));
+            logger.info(`[Event] ProfessionalAccessRequested: ID ${numericRequestId} from ${professional} to ${patient}`);
+
+            await AccessRequest.findOneAndUpdate(
+                { requestId: numericRequestId },
+                {
+                    requestId: numericRequestId,
+                    recordIds: numericRecordIds,
+                    professionalAddress: professional.toLowerCase(),
+                    patientAddress: patient.toLowerCase(),
+                    status: 'pending',
+                },
+                { upsert: true, new: true }
+            );
+            logger.info(`[Indexer] Saved new access request ID ${numericRequestId}.`);
+        } catch (error) {
+            logger.error(`Error processing ProfessionalAccessRequested event: ${error.message}`);
         }
     });
     

@@ -2,159 +2,160 @@ const express = require('express');
 const router = express.Router();
 const User = require('../../models/User');
 const RegistrationRequest = require('../../models/RegistrationRequest');
-const Record = require('../../models/Record'); // <-- IMPORT the Record model
+const Record = require('../../models/Record');
+const AccessRequest = require('../../models/AccessRequest');
 const logger = require('../../utils/logger');
 
 /**
- * @route   GET /api/users/status/:address
- * @desc    Check the comprehensive status of a given wallet address.
- * @access  Public
- */
+ * @route   GET /api/users/status/:address
+ * @desc    Check the comprehensive status of a given wallet address.
+ * @access  Public
+ */
 router.get('/status/:address', async (req, res, next) => {
-    try {
-        const address = req.params.address.toLowerCase();
-        const user = await User.findOne({ address });
+    try {
+        const address = req.params.address.toLowerCase();
+        const user = await User.findOne({ address });
 
-        if (user) {
-            return res.json({
-                success: true,
-                status: user.professionalStatus,
-                role: user.role,
-                isVerified: user.isVerified,
-                hospitalId: user.hospitalId,
-                requestedHospitalId: user.requestedHospitalId,
-                name: user.name,
-                publicKey: user.publicKey,
-            });
-        }
+        if (user) {
+            return res.json({
+                success: true,
+                status: user.professionalStatus,
+                role: user.role,
+                isVerified: user.isVerified,
+                hospitalId: user.hospitalId,
+                requestedHospitalId: user.requestedHospitalId,
+                name: user.name,
+                publicKey: user.publicKey,
+            });
+        }
 
-        const pendingRequest = await RegistrationRequest.findOne({
-            requesterAddress: address,
-            status: { $in: ['pending', 'verifying'] }
-        });
+        const pendingRequest = await RegistrationRequest.findOne({
+            requesterAddress: address,
+            status: { $in: ['pending', 'verifying'] }
+        });
 
-        if (pendingRequest) {
-            return res.json({ success: true, status: 'pending_verification' });
-        }
+        if (pendingRequest) {
+            return res.json({ success: true, status: 'pending_verification' });
+        }
 
-        return res.json({ success: true, status: 'unregistered' });
+        return res.json({ success: true, status: 'unregistered' });
 
-    } catch (error) {
-        logger.error(`Error fetching user status for ${req.params.address}:`, error);
-        next(error);
-    }
+    } catch (error) {
+        logger.error(`Error fetching user status for ${req.params.address}:`, error);
+        next(error);
+    }
 });
 
 /**
- * @route   POST /api/users/request-association
- * @desc    Allows a professional to request affiliation with a hospital.
- * @access  Private (Authenticated User)
- */
+ * @route   POST /api/users/request-association
+ * @desc    Allows a professional to request affiliation with a hospital.
+ * @access  Private (Authenticated User)
+ */
 router.post('/request-association', async (req, res, next) => {
-    try {
-        const { address, name, role, requestedHospitalId } = req.body;
+    try {
+        const { address, name, role, requestedHospitalId } = req.body;
 
-        if (!address || !name || role === undefined || role === null || requestedHospitalId === undefined || requestedHospitalId === null) {
-            return res.status(400).json({ success: false, message: 'Missing required fields.' });
-        }
+        if (!address || !name || role === undefined || role === null || requestedHospitalId === undefined || requestedHospitalId === null) {
+            return res.status(400).json({ success: false, message: 'Missing required fields.' });
+        }
 
-        const lowerCaseAddress = address.toLowerCase();
+        const lowerCaseAddress = address.toLowerCase();
 
-        const updatedUser = await User.findOneAndUpdate(
-            { address: lowerCaseAddress },
-            {
-                $set: {
-                    address: lowerCaseAddress,
-                    name: name,
-                    role: role,
-                    professionalStatus: 'pending',
-                    requestedHospitalId: requestedHospitalId,
-                    isVerified: false,
-                    hospitalId: null,
-                }
-            },
-            { upsert: true, new: true }
-        );
+        const updatedUser = await User.findOneAndUpdate(
+            { address: lowerCaseAddress },
+            {
+                $set: {
+                    address: lowerCaseAddress,
+                    name: name,
+                    role: role,
+                    professionalStatus: 'pending',
+                    requestedHospitalId: requestedHospitalId,
+                    isVerified: false,
+                    hospitalId: null,
+                }
+            },
+            { upsert: true, new: true }
+        );
 
-        logger.info(`User ${name} (${lowerCaseAddress}) requested association with hospital ${requestedHospitalId}`);
-        res.status(200).json({
-            success: true,
-            message: 'Affiliation request submitted successfully. Please wait for admin approval.',
-            user: updatedUser
-        });
+        logger.info(`User ${name} (${lowerCaseAddress}) requested association with hospital ${requestedHospitalId}`);
+        res.status(200).json({
+            success: true,
+            message: 'Affiliation request submitted successfully. Please wait for admin approval.',
+            user: updatedUser
+        });
 
-    } catch (error) {
-        logger.error(`Error processing association request:`, error);
-        next(error);
-    }
+    } catch (error) {
+        logger.error(`Error processing association request:`, error);
+        next(error);
+    }
 });
 
 /**
- * @route   POST /api/users/register-patient
- * @desc    Creates a database record for a newly registered patient.
- * @access  Private (Authenticated User)
- */
+ * @route   POST /api/users/register-patient
+ * @desc    Creates a database record for a newly registered patient.
+ * @access  Private (Authenticated User)
+ */
 router.post('/register-patient', async (req, res, next) => {
-    try {
-        const { address, name } = req.body;
+    try {
+        const { address, name } = req.body;
 
-        if (!address || !name) {
-            return res.status(400).json({ success: false, message: 'Missing required fields.' });
-        }
+        if (!address || !name) {
+            return res.status(400).json({ success: false, message: 'Missing required fields.' });
+        }
 
-        const lowerCaseAddress = address.toLowerCase();
+        const lowerCaseAddress = address.toLowerCase();
 
-        const newPatient = await User.findOneAndUpdate(
-            { address: lowerCaseAddress },
-            {
-                $set: {
-                    address: lowerCaseAddress,
-                    name: name,
-                    role: 'Patient',
-                    isVerified: true,
-                    professionalStatus: 'approved',
-                }
-            },
-            { upsert: true, new: true }
-        );
+        const newPatient = await User.findOneAndUpdate(
+            { address: lowerCaseAddress },
+            {
+                $set: {
+                    address: lowerCaseAddress,
+                    name: name,
+                    role: 'Patient',
+                    isVerified: true,
+                    professionalStatus: 'approved',
+                }
+            },
+            { upsert: true, new: true }
+        );
 
-        logger.info(`Patient ${name} (${lowerCaseAddress}) created in database.`);
-        res.status(201).json({
-            success: true,
-            message: 'Patient record created successfully.',
-            user: newPatient
-        });
+        logger.info(`Patient ${name} (${lowerCaseAddress}) created in database.`);
+        res.status(201).json({
+            success: true,
+            message: 'Patient record created successfully.',
+            user: newPatient
+        });
 
-    } catch (error) {
-        logger.error(`Error processing patient registration:`, error);
-        next(error);
-    }
+    } catch (error) {
+        logger.error(`Error processing patient registration:`, error);
+        next(error);
+    }
 });
 
 /**
- * @route   GET /api/users/records/patient/:address
- * @desc    Get all records for a specific patient, with optional search.
- * @access  Public (should be protected later)
- */
+ * @route   GET /api/users/records/patient/:address
+ * @desc    Get all records for a specific patient, with optional search.
+ * @access  Public (should be protected later)
+ */
 router.get('/records/patient/:address', async (req, res, next) => {
-    try {
-        const { address } = req.params;
-        const { q } = req.query; // Search query for title
+    try {
+        const { address } = req.params;
+        const { q } = req.query; // Search query for title
 
-        let query = { owner: address.toLowerCase() };
+        let query = { owner: address.toLowerCase() };
 
-        if (q) {
-            // Using a case-insensitive regex for a flexible substring search
-            query.title = { $regex: q, $options: 'i' };
-        }
+        if (q) {
+            // Using a case-insensitive regex for a flexible substring search
+            query.title = { $regex: q, $options: 'i' };
+        }
 
-        const records = await Record.find(query).sort({ timestamp: -1 });
+        const records = await Record.find(query).sort({ timestamp: -1 });
 
-        res.json({ success: true, data: records });
-    } catch (error) {
-        logger.error(`Error fetching records for patient ${req.params.address}:`, error);
-        next(error);
-    }
+        res.json({ success: true, data: records });
+    } catch (error) {
+        logger.error(`Error fetching records for patient ${req.params.address}:`, error);
+        next(error);
+    }
 });
 
 /**
@@ -195,5 +196,107 @@ router.get('/search-patients', async (req, res, next) => {
     }
 });
 
+
+/**
+ * @route   GET /api/users/access-requests/patient/:address
+ * @desc    Get all pending access requests for a patient.
+ * @access  Private (Patient only)
+ */
+router.get('/access-requests/patient/:address', async (req, res, next) => {
+    try {
+        const patientAddress = req.params.address.toLowerCase();
+
+        // This aggregation pipeline enriches the request data.
+        const requests = await AccessRequest.aggregate([
+            // 1. Find all pending requests for the specified patient.
+            {
+                $match: {
+                    patientAddress: patientAddress,
+                    status: 'pending'
+                }
+            },
+            // 2. Join with the 'users' collection to get the professional's name.
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'professionalAddress',
+                    foreignField: 'address',
+                    as: 'professionalInfo'
+                }
+            },
+            // 3. Join with the 'records' collection to get details of the requested records.
+            {
+                $lookup: {
+                    from: 'records',
+                    localField: 'recordIds',
+                    foreignField: 'recordId',
+                    as: 'recordInfo'
+                }
+            },
+            // 4. Reshape the output for a clean API response.
+            {
+                $project: {
+                    _id: 0,
+                    requestId: 1,
+                    professional: { $arrayElemAt: ['$professionalInfo.name', 0] },
+                    professionalAddress: 1,
+                    requestedRecords: {
+                        $map: {
+                            input: '$recordInfo',
+                            as: 'record',
+                            in: {
+                                recordId: '$$record.recordId',
+                                title: '$$record.title'
+                            }
+                        }
+                    },
+                    createdAt: '$createdAt'
+                }
+            },
+            // 5. Sort by most recent request.
+            { $sort: { createdAt: -1 } }
+        ]);
+
+        res.json({ success: true, data: requests });
+
+    } catch (error) {
+        logger.error(`Error fetching access requests for patient ${req.params.address}:`, error);
+        next(error);
+    }
+});
+
+
+/**
+ * @route   POST /api/users/access-requests/respond
+ * @desc    Allow a patient to approve or reject an access request.
+ * @access  Private (Patient only)
+ */
+router.post('/access-requests/respond', async (req, res, next) => {
+    try {
+        const { requestId, response } = req.body; // response should be 'approved' or 'rejected'
+
+        if (requestId === undefined || !['approved', 'rejected'].includes(response)) {
+            return res.status(400).json({ success: false, message: 'Invalid request ID or response.' });
+        }
+
+        const request = await AccessRequest.findOne({ requestId: requestId, status: 'pending' });
+
+        if (!request) {
+            return res.status(404).json({ success: false, message: 'Pending request not found.' });
+        }
+
+        // TODO: Add authentication check to ensure `msg.sender` owns this request.
+
+        request.status = response;
+        await request.save();
+
+        logger.info(`Patient responded '${response}' to access request ID ${requestId}.`);
+        res.status(200).json({ success: true, message: `Request has been ${response}.` });
+
+    } catch (error) {
+        logger.error(`Error responding to access request:`, error);
+        next(error);
+    }
+});
 
 module.exports = router;

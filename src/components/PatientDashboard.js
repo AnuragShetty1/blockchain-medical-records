@@ -9,9 +9,9 @@ import UploadForm from "./UploadForm";
 import AccessManager from "./AccessManager";
 import RequestManager from "./RequestManager";
 import Profile from "./Profile";
-import RecordList from "./RecordList"; // <-- IMPORT RecordList
+import RecordList from "./RecordList";
 
-// --- ICONS (kept within the component for encapsulation) ---
+// --- ICONS ---
 const DashboardIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>;
 const RecordsIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>;
 const AccessIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>;
@@ -25,7 +25,8 @@ export default function PatientDashboard() {
     const { userProfile, records, requests, accessList } = useWeb3();
     const [activeView, setActiveView] = useState('dashboard');
     const [greeting, setGreeting] = useState('Welcome');
-    const [searchQuery, setSearchQuery] = useState(''); // <-- ADD search query state
+    const [searchQuery, setSearchQuery] = useState('');
+    const [professionalRequestCount, setProfessionalRequestCount] = useState(0);
 
     useEffect(() => {
         const hour = new Date().getHours();
@@ -35,7 +36,6 @@ export default function PatientDashboard() {
     }, []);
     
     const handleCopyAddress = () => {
-        // Using document.execCommand for better iframe compatibility
         const textArea = document.createElement("textarea");
         textArea.value = userProfile.walletAddress;
         document.body.appendChild(textArea);
@@ -49,18 +49,19 @@ export default function PatientDashboard() {
         document.body.removeChild(textArea);
     };
 
+    const totalRequestCount = (requests?.length || 0) + professionalRequestCount;
+
     const renderContent = () => {
         switch (activeView) {
             case 'dashboard':
-                return <DashboardOverview records={records || []} accessList={accessList || []} requests={requests || []} />;
+                return <DashboardOverview records={records || []} accessList={accessList || []} totalRequests={totalRequestCount} />;
             case 'records':
                 return (
                     <div className="p-8 bg-white rounded-2xl shadow-xl border border-slate-200">
                         <h2 className="text-3xl font-bold text-slate-800 mb-6">My Records</h2>
                         <UploadForm />
-                        {/* --- NEW SEARCH AND LIST SECTION --- */}
                         <div className="mt-8 pt-8 border-t border-slate-200">
-                             <h3 className="text-2xl font-bold text-slate-800 mb-6">My Record History</h3>
+                            <h3 className="text-2xl font-bold text-slate-800 mb-6">My Record History</h3>
                             <input 
                                 type="text"
                                 value={searchQuery}
@@ -83,18 +84,18 @@ export default function PatientDashboard() {
                 return (
                     <div className="p-8 bg-white rounded-2xl shadow-xl border border-slate-200">
                         <h2 className="text-3xl font-bold text-slate-800 mb-6">Pending Requests</h2>
-                        <RequestManager />
+                        <RequestManager onCountChange={setProfessionalRequestCount} />
                     </div>
                 );
             case 'profile':
                 return (
-                       <div className="p-8 bg-white rounded-2xl shadow-xl border border-slate-200">
-                           <h2 className="text-3xl font-bold text-slate-800 mb-6">My Profile</h2>
-                           <Profile />
-                       </div>
+                    <div className="p-8 bg-white rounded-2xl shadow-xl border border-slate-200">
+                        <h2 className="text-3xl font-bold text-slate-800 mb-6">My Profile</h2>
+                        <Profile />
+                    </div>
                 );
             default:
-                return <DashboardOverview records={records || []} accessList={accessList || []} requests={requests || []} />;
+                return <DashboardOverview records={records || []} accessList={accessList || []} totalRequests={totalRequestCount} />;
         }
     };
 
@@ -140,7 +141,7 @@ export default function PatientDashboard() {
                     <NavItem icon={<DashboardIcon />} label="Dashboard" active={activeView === 'dashboard'} onClick={() => setActiveView('dashboard')} />
                     <NavItem icon={<RecordsIcon />} label="My Records" active={activeView === 'records'} onClick={() => setActiveView('records')} />
                     <NavItem icon={<AccessIcon />} label="Access Management" active={activeView === 'access'} onClick={() => setActiveView('access')} />
-                    <NavItem icon={<RequestsIcon />} label="Pending Requests" active={activeView === 'requests'} onClick={() => setActiveView('requests')} notificationCount={requests?.length || 0} />
+                    <NavItem icon={<RequestsIcon />} label="Pending Requests" active={activeView === 'requests'} onClick={() => setActiveView('requests')} notificationCount={totalRequestCount} />
                     <NavItem icon={<ProfileIcon />} label="My Profile" active={activeView === 'profile'} onClick={() => setActiveView('profile')} />
                 </nav>
             </aside>
@@ -168,18 +169,18 @@ const NavItem = ({ icon, label, active, onClick, notificationCount = 0 }) => (
     </button>
 );
 
-const DashboardOverview = ({ records, accessList, requests }) => (
+const DashboardOverview = ({ records, accessList, totalRequests }) => (
     <div>
         <h2 className="text-3xl font-bold text-slate-800 mb-6">Dashboard Overview</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             <StatCard title="Total Records" value={records?.length || 0} icon={<RecordsIcon />} />
             <StatCard title="Active Permissions" value={accessList?.length || 0} icon={<AccessIcon />} />
-            <StatCard title="Pending Requests" value={requests?.length || 0} icon={<RequestsIcon />} highlight={(requests?.length || 0) > 0} />
+            <StatCard title="Pending Requests" value={totalRequests || 0} icon={<RequestsIcon />} highlight={(totalRequests || 0) > 0} />
         </div>
 
         <div className="mt-10 bg-white rounded-2xl shadow-xl border border-slate-200">
             <h3 className="text-xl font-bold text-slate-800 p-6 border-b border-slate-200">Recent Activity</h3>
-            <RecentActivityFeed records={records || []} accessList={accessList || []} requests={requests || []} />
+            <RecentActivityFeed records={records || []} accessList={accessList || []} requests={[]} />
         </div>
     </div>
 );
@@ -201,6 +202,7 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
         const recordActivities = (records || []).map(r => ({
             type: 'Record Added',
             description: `New record uploaded.`,
+            // FIX: Convert BigInt timestamp to a Number in milliseconds.
             timestamp: Number(r.timestamp) * 1000,
             icon: <UploadIcon />,
             color: 'text-sky-500',
@@ -254,3 +256,4 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
         </ul>
     );
 };
+
