@@ -9,6 +9,7 @@ const RegistrationRequest = require('../models/RegistrationRequest');
 const User = require('../models/User');
 const Record = require('../models/Record');
 const AccessRequest = require('../models/AccessRequest');
+const AccessGrant = require('../models/AccessGrant'); // <-- FIX: Import the AccessGrant model
 
 const startIndexer = (wss) => {
 
@@ -236,7 +237,38 @@ const startIndexer = (wss) => {
         }
     });
     
+    // --- FIX: This listener was missing. ---
+    // This will now listen for when a patient approves access and save it to the database.
+    contract.on('AccessGranted', async (recordId, owner, grantee, expiration, encryptedDek, event) => {
+        try {
+            const numericRecordId = Number(recordId);
+            logger.info(`[Event] AccessGranted: Record ID ${numericRecordId} from owner ${owner} to grantee ${grantee}`);
+
+            // Use findOneAndUpdate to prevent creating duplicates if the indexer restarts.
+            await AccessGrant.findOneAndUpdate(
+                {
+                    recordId: numericRecordId,
+                    professionalAddress: grantee.toLowerCase()
+                },
+                {
+                    recordId: numericRecordId,
+                    patientAddress: owner.toLowerCase(),
+                    professionalAddress: grantee.toLowerCase(),
+                    expirationTimestamp: new Date(Number(expiration) * 1000),
+                    rewrappedKey: encryptedDek,
+                },
+                { upsert: true, new: true }
+            );
+            
+            logger.info(`[Indexer] Saved access grant for record ID ${numericRecordId} to professional ${grantee}.`);
+
+        } catch (error) {
+            logger.error(`Error processing AccessGranted event: ${error.message}`);
+        }
+    });
+
     logger.info('Indexer is now listening for blockchain events.');
 };
 
 module.exports = startIndexer;
+

@@ -18,6 +18,8 @@ const InfoIcon = () => <svg className="w-12 h-12 text-slate-400" xmlns="http://w
 const Spinner = () => <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-slate-500"></div>;
 const ButtonSpinner = () => <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>;
 const CloseIcon = () => <svg className="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>;
+const ChevronDownIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>;
+
 
 const DOCTOR_CATEGORIES = [
     { value: 'doctor-note', label: 'Doctor\'s Note' },
@@ -323,11 +325,11 @@ const RequestAccessSection = () => {
                     ) : patientRecords.length > 0 ? (
                         <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
                            {patientRecords.map(record => (
-                               <label key={record.recordId} className="flex items-center p-3 bg-slate-50 rounded-lg border border-slate-200 cursor-pointer hover:bg-teal-50/50 hover:border-teal-200 transition-colors">
-                                   <input type="checkbox" checked={selectedRecords.has(record.recordId)} onChange={() => handleRecordSelect(record.recordId)} className="h-5 w-5 rounded border-gray-300 text-teal-600 focus:ring-teal-500" />
-                                   <span className="ml-4 font-medium text-slate-700">{record.title}</span>
-                                   <span className="ml-auto text-sm text-slate-500 bg-slate-200 px-2 py-1 rounded-full">{record.category}</span>
-                               </label>
+                                <label key={record.recordId} className="flex items-center p-3 bg-slate-50 rounded-lg border border-slate-200 cursor-pointer hover:bg-teal-50/50 hover:border-teal-200 transition-colors">
+                                    <input type="checkbox" checked={selectedRecords.has(record.recordId)} onChange={() => handleRecordSelect(record.recordId)} className="h-5 w-5 rounded border-gray-300 text-teal-600 focus:ring-teal-500" />
+                                    <span className="ml-4 font-medium text-slate-700">{record.title}</span>
+                                    <span className="ml-auto text-sm text-slate-500 bg-slate-200 px-2 py-1 rounded-full">{record.category}</span>
+                                </label>
                            ))}
                         </div>
                     ) : (
@@ -370,17 +372,34 @@ const RequestAccessSection = () => {
     );
 };
 
+// --- FIX: This entire section has been rewritten ---
 const ReviewSection = () => {
-    const { contract, account, keyPair } = useWeb3();
-    const [sharedRecords, setSharedRecords] = useState([]);
+    const { account } = useWeb3();
+    const [patientGroups, setPatientGroups] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
     const fetchSharedRecords = useCallback(async () => {
-        // ... (rest of the fetch logic is unchanged and correct)
-    }, [contract, account, keyPair]);
+        if (!account) return;
+        setIsLoading(true);
+        try {
+            const response = await axios.get(`http://localhost:3001/api/users/records/professional/${account}`);
+            if (response.data.success) {
+                setPatientGroups(response.data.data);
+            } else {
+                toast.error("Failed to fetch shared records.");
+                setPatientGroups([]);
+            }
+        } catch (error) {
+            console.error("Error fetching shared records:", error);
+            toast.error("An error occurred while fetching records.");
+            setPatientGroups([]);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [account]);
 
     useEffect(() => {
-        // ... (useEffect logic is unchanged and correct)
+        fetchSharedRecords();
     }, [fetchSharedRecords]);
 
     if (isLoading) {
@@ -392,7 +411,7 @@ const ReviewSection = () => {
         );
     }
 
-    if (sharedRecords.length === 0) {
+    if (patientGroups.length === 0) {
         return (
             <div className="text-center p-12 bg-white rounded-lg shadow-sm border-slate-200">
                 <InfoIcon />
@@ -402,5 +421,39 @@ const ReviewSection = () => {
         )
     }
 
-    return <DoctorRecordList records={sharedRecords} />;
+    return (
+        <div className="space-y-6">
+            {patientGroups.map(({ patient, records }) => (
+                <PatientRecordGroup key={patient.address} patient={patient} records={records} />
+            ))}
+        </div>
+    );
 };
+
+const PatientRecordGroup = ({ patient, records }) => {
+    const [isOpen, setIsOpen] = useState(true);
+
+    return (
+        <div className="bg-white rounded-lg shadow-sm border border-slate-200">
+            <button 
+                onClick={() => setIsOpen(!isOpen)}
+                className="w-full flex justify-between items-center p-4 text-left"
+            >
+                <div>
+                    <h3 className="font-bold text-slate-800">{patient.name}</h3>
+                    <p className="text-sm text-slate-500 font-mono">{patient.address}</p>
+                </div>
+                <div className="flex items-center gap-4">
+                     <span className="text-sm font-medium bg-teal-100 text-teal-800 px-3 py-1 rounded-full">{records.length} Record(s)</span>
+                    <ChevronDownIcon className={`transform transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                </div>
+            </button>
+            {isOpen && (
+                <div className="p-4 border-t border-slate-200">
+                    <DoctorRecordList records={records} />
+                </div>
+            )}
+        </div>
+    );
+};
+

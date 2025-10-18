@@ -4,6 +4,7 @@ const User = require('../../models/User');
 const RegistrationRequest = require('../../models/RegistrationRequest');
 const Record = require('../../models/Record');
 const AccessRequest = require('../../models/AccessRequest');
+const AccessGrant = require('../../models/AccessGrant'); // <-- FIX: Import the AccessGrant model
 const logger = require('../../utils/logger');
 
 /**
@@ -299,4 +300,79 @@ router.post('/access-requests/respond', async (req, res, next) => {
     }
 });
 
+// --- FIX: This is the new endpoint that was missing ---
+/**
+ * @route   GET /api/users/records/professional/:address
+ * @desc    Get all records a professional has been granted access to, grouped by patient.
+ * @access  Private (Professional only)
+ */
+router.get('/records/professional/:address', async (req, res, next) => {
+    try {
+        const professionalAddress = req.params.address.toLowerCase();
+
+        const grants = await AccessGrant.find({ 
+            professionalAddress: professionalAddress,
+            // We can also filter for grants that haven't expired yet
+            // expirationTimestamp: { $gt: new Date() } 
+        });
+
+        if (!grants || grants.length === 0) {
+            return res.json({ success: true, data: [] });
+        }
+        
+        // Group grants by patient address
+        const grantsByPatient = grants.reduce((acc, grant) => {
+            const patientAddr = grant.patientAddress;
+            if (!acc[patientAddr]) {
+                acc[patientAddr] = [];
+            }
+            acc[patientAddr].push(grant);
+            return acc;
+        }, {});
+        
+        const patientAddresses = Object.keys(grantsByPatient);
+
+        // Fetch user and record details in parallel
+        const [patients, allRecords] = await Promise.all([
+             User.find({ address: { $in: patientAddresses } }).select('name address'),
+             Record.find({ recordId: { $in: grants.map(g => g.recordId) } })
+        ]);
+
+        const recordsMap = allRecords.reduce((acc, record) => {
+            acc[record.recordId] = record;
+            return acc;
+        }, {});
+
+        const patientMap = patients.reduce((acc, patient) => {
+            acc[patient.address] = patient;
+            return acc;
+        }, {});
+
+        const result = patientAddresses.map(address => {
+            const patientGrants = grantsByPatient[address];
+            const patientRecords = patientGrants.map(grant => {
+                const record = recordsMap[grant.recordId];
+                // Attach the rewrapped key for decryption on the frontend
+                return { ...record.toObject(), rewrappedKey: grant.rewrappedKey };
+            });
+            
+            return {
+                patient: {
+                    name: patientMap[address]?.name || 'Unknown Patient',
+                    address: address
+                },
+                records: patientRecords
+            }
+        });
+
+        res.json({ success: true, data: result });
+
+    } catch (error) {
+        logger.error(`Error fetching records for professional ${req.params.address}:`, error);
+        next(error);
+    }
+});
+
+
 module.exports = router;
+
