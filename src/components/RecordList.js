@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useWeb3 } from '@/context/Web3Context';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -12,15 +12,29 @@ const ViewIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/sv
 const SpinnerIcon = () => <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>;
 const Spinner = () => <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-500"></div>;
 
-// Helper to get category styles
+// --- CONFIGURATION ---
+const CATEGORIES = [
+    { id: 'all', name: 'All Categories', icon: '🗂️' },
+    { id: 'lab-result', name: 'Lab Results', icon: '🔬' },
+    { id: 'prescription', name: 'Prescriptions', icon: '💊' },
+    { id: 'doctor-note', name: 'Doctor Notes', icon: '📝' },
+    { id: 'insurance-claim', name: 'Insurance', icon: '📄' },
+    { id: 'other', name: 'Other', icon: '📁' },
+];
+
 const getCategoryStyle = (category) => {
     switch (category) {
-        case 'lab-result': return { icon: '🔬', color: 'bg-blue-100 text-blue-800' };
-        case 'prescription': return { icon: '💊', color: 'bg-green-100 text-green-800' };
-        case 'doctor-note': return { icon: '📝', color: 'bg-yellow-100 text-yellow-800' };
-        case 'insurance-claim': return { icon: '📄', color: 'bg-indigo-100 text-indigo-800' };
-        default: return { icon: '📁', color: 'bg-slate-100 text-slate-800' };
+        case 'lab-result': return { color: 'bg-blue-100 text-blue-800' };
+        case 'prescription': return { color: 'bg-green-100 text-green-800' };
+        case 'doctor-note': return { color: 'bg-yellow-100 text-yellow-800' };
+        case 'insurance-claim': return { color: 'bg-indigo-100 text-indigo-800' };
+        default: return { color: 'bg-slate-100 text-slate-800' };
     }
+};
+
+const truncateAddress = (address) => {
+    if (!address) return '';
+    return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
 };
 
 export default function RecordList({ searchQuery }) {
@@ -28,72 +42,53 @@ export default function RecordList({ searchQuery }) {
     const [records, setRecords] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [decryptionStates, setDecryptionStates] = useState({});
+    const [selectedCategory, setSelectedCategory] = useState('all');
 
-    // --- REVISED FETCH LOGIC WITH POLLING ---
-
-    // This useEffect handles the initial data load and any subsequent searches.
+    // Effect for initial load and search
     useEffect(() => {
         const fetchRecords = async (showLoader = true) => {
             if (!account) return;
             if (showLoader) setIsLoading(true);
-
             try {
-                const params = {};
-                if (searchQuery) {
-                    params.q = searchQuery;
-                }
+                const params = { q: searchQuery || '' };
                 const response = await axios.get(`http://localhost:3001/api/users/records/patient/${account}`, { params });
-                
-                if (response.data.success) {
-                    setRecords(response.data.data || []);
-                } else {
-                    toast.error("Could not load your records.");
-                    setRecords([]);
-                }
+                setRecords(response.data.success ? response.data.data || [] : []);
             } catch (error) {
-                console.error("Failed to fetch records from backend:", error);
-                toast.error("Could not connect to the server to get records.");
+                console.error("Failed to fetch records:", error);
+                toast.error("Could not get records.");
             } finally {
                 if (showLoader) setIsLoading(false);
             }
         };
 
-        // For searches, we use a debounce to prevent spamming the API.
-        const debounceFetch = setTimeout(() => {
-            fetchRecords(true); // Always show loader for search
-        }, 300);
-
+        const debounceFetch = setTimeout(() => fetchRecords(true), 300);
         return () => clearTimeout(debounceFetch);
     }, [account, searchQuery]);
 
-    // This separate useEffect handles the periodic background polling.
+    // Effect for background polling
     useEffect(() => {
         const pollRecords = async () => {
             if (!account) return;
-            
-            // This fetch runs in the background and does not trigger the main loading spinner.
             try {
-                const params = {};
-                if (searchQuery) {
-                    params.q = searchQuery;
-                }
+                const params = { q: searchQuery || '' };
                 const response = await axios.get(`http://localhost:3001/api/users/records/patient/${account}`, { params });
-                
                 if (response.data.success) {
                     setRecords(response.data.data || []);
                 }
             } catch (error) {
-                // We typically don't show an error for a failed poll to avoid spamming the user.
                 console.error("Background poll failed:", error);
             }
         };
-
-        // Set up the interval to poll every 10 seconds.
         const intervalId = setInterval(pollRecords, 10000);
-
-        // Clean up the interval when the component unmounts.
         return () => clearInterval(intervalId);
-    }, [account, searchQuery]); // Rerun if account or search query changes to poll with the right params.
+    }, [account, searchQuery]);
+    
+    const filteredRecords = useMemo(() => {
+        if (selectedCategory === 'all') {
+            return records;
+        }
+        return records.filter(record => record.category === selectedCategory);
+    }, [records, selectedCategory]);
 
     const handleDecryptAndView = async (record) => {
         if (!keyPair?.privateKey) {
@@ -144,46 +139,79 @@ export default function RecordList({ searchQuery }) {
         );
     }
 
-    if (records.length === 0) {
-        return (
-            <div className="text-center p-12 bg-slate-50 rounded-lg">
-                <p className="font-semibold text-slate-600">No records found.</p>
-                <p className="text-sm text-slate-500 mt-2">
-                    {searchQuery ? "Try adjusting your search." : "Upload a record to get started."}
-                </p>
-            </div>
-        );
-    }
-
     return (
-        <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl shadow-sm">
-            {records.map((record) => (
-                <div key={record.recordId} className="flex items-center justify-between p-4 hover:bg-slate-50 transition-colors">
-                    <div className="flex items-center gap-4 flex-1 min-w-0">
-                        <div className={`flex-shrink-0 w-12 h-12 rounded-lg flex items-center justify-center text-2xl ${getCategoryStyle(record.category).color}`}>
-                            {getCategoryStyle(record.category).icon}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-md text-slate-800 truncate" title={record.title}>
-                                {record.title}
-                            </p>
-                            <p className="text-sm text-slate-500 mt-1">
-                                Uploaded on: {format(new Date(record.timestamp), "PPpp")}
-                            </p>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2 ml-4">
-                         <button
-                            onClick={() => handleDecryptAndView(record)}
-                            disabled={decryptionStates[record.recordId] === 'pending' || !keyPair}
-                            className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-slate-400 transition-colors shadow-sm"
-                        >
-                            {decryptionStates[record.recordId] === 'pending' ? <SpinnerIcon /> : <ViewIcon />}
-                            View
-                        </button>
-                    </div>
+        <div>
+            {/* --- NEW CATEGORY DROPDOWN FILTER --- */}
+            <div className="mb-6 pb-4 border-b border-slate-200">
+                <label htmlFor="category-filter" className="block text-sm font-medium text-slate-700 mb-1">
+                    Filter by Category
+                </label>
+                <select
+                    id="category-filter"
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                    className="w-full max-w-xs px-3 py-2 border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white transition"
+                >
+                    {CATEGORIES.map(cat => (
+                        <option key={cat.id} value={cat.id}>
+                            {cat.name}
+                        </option>
+                    ))}
+                </select>
+            </div>
+
+            {filteredRecords.length === 0 ? (
+                <div className="text-center p-12 bg-slate-50 rounded-lg">
+                    <p className="font-semibold text-slate-600">No records found.</p>
+                    <p className="text-sm text-slate-500 mt-2">
+                        {searchQuery ? "Try adjusting your search or category." : "Upload a record to get started."}
+                    </p>
                 </div>
-            ))}
+            ) : (
+                <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl shadow-sm">
+                    {filteredRecords.map((record) => (
+                        <div key={record.recordId} className="flex items-start justify-between p-4 hover:bg-slate-50 transition-colors">
+                            <div className="flex items-start gap-4 flex-1 min-w-0">
+                                <div className={`flex-shrink-0 w-12 h-12 rounded-lg flex items-center justify-center text-2xl ${getCategoryStyle(record.category).color}`}>
+                                    {CATEGORIES.find(c => c.id === record.category)?.icon || '📁'}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="font-bold text-md text-slate-800 truncate" title={record.title}>
+                                        {record.title}
+                                    </p>
+                                    <p className="text-sm text-slate-500 mt-1">
+                                        {format(new Date(record.timestamp), "PPpp")}
+                                    </p>
+                                    <div className="flex items-center gap-2 mt-2">
+                                        {record.isVerified ? (
+                                            <span className="px-2 py-0.5 text-xs font-semibold text-green-800 bg-green-100 rounded-full">
+                                                Verified
+                                            </span>
+                                        ) : (
+                                            <span className="px-2 py-0.5 text-xs font-semibold text-sky-800 bg-sky-100 rounded-full">
+                                                Self Uploaded
+                                            </span>
+                                        )}
+                                        <p className="text-xs text-slate-400 font-mono" title={record.uploadedBy}>
+                                            by {truncateAddress(record.uploadedBy)}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2 ml-4 flex-shrink-0 mt-1">
+                                 <button
+                                    onClick={() => handleDecryptAndView(record)}
+                                    disabled={decryptionStates[record.recordId] === 'pending' || !keyPair}
+                                    className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-slate-400 transition-colors shadow-sm"
+                                >
+                                    {decryptionStates[record.recordId] === 'pending' ? <SpinnerIcon /> : <ViewIcon />}
+                                    View
+                                </button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
         </div>
     );
 }
