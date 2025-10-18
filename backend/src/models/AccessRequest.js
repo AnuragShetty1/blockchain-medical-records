@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+const mongoose = require('mongoose');
 
 const accessRequestSchema = new mongoose.Schema({
     requestId: {
@@ -31,6 +31,6 @@ const accessRequestSchema = new mongoose.Schema({
     },
 }, { timestamps: true });
 
-const AccessRequest = mongoose.model('AccessRequest', accessRequestSchema);
+// FIX: Changed from 'export default' to 'module.exports' to align with CommonJS imports in the indexer.
+module.exports = mongoose.model('AccessRequest', accessRequestSchema);
 
-export default AccessRequest;
