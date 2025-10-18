@@ -1,10 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../../models/User');
+const Hospital = require('../../models/Hospital'); // Import Hospital model
 const RegistrationRequest = require('../../models/RegistrationRequest');
 const Record = require('../../models/Record');
 const AccessRequest = require('../../models/AccessRequest');
-const AccessGrant = require('../../models/AccessGrant'); // <-- FIX: Import the AccessGrant model
+const AccessGrant = require('../../models/AccessGrant');
 const logger = require('../../utils/logger');
 
 /**
@@ -300,7 +301,6 @@ router.post('/access-requests/respond', async (req, res, next) => {
     }
 });
 
-// --- FIX: This is the new endpoint that was missing ---
 /**
  * @route   GET /api/users/records/professional/:address
  * @desc    Get all records a professional has been granted access to, grouped by patient.
@@ -312,8 +312,7 @@ router.get('/records/professional/:address', async (req, res, next) => {
 
         const grants = await AccessGrant.find({ 
             professionalAddress: professionalAddress,
-            // We can also filter for grants that haven't expired yet
-            // expirationTimestamp: { $gt: new Date() } 
+            expirationTimestamp: { $gt: new Date() } 
         });
 
         if (!grants || grants.length === 0) {
@@ -350,11 +349,14 @@ router.get('/records/professional/:address', async (req, res, next) => {
 
         const result = patientAddresses.map(address => {
             const patientGrants = grantsByPatient[address];
-            const patientRecords = patientGrants.map(grant => {
-                const record = recordsMap[grant.recordId];
-                // Attach the rewrapped key for decryption on the frontend
-                return { ...record.toObject(), rewrappedKey: grant.rewrappedKey };
-            });
+            const patientRecords = patientGrants
+                .map(grant => {
+                    const record = recordsMap[grant.recordId];
+                    if (!record) return null; // Handle case where record might not be found
+                    // Attach the rewrapped key for decryption on the frontend
+                    return { ...record.toObject(), rewrappedKey: grant.rewrappedKey };
+                })
+                .filter(Boolean); // Filter out any nulls
             
             return {
                 patient: {
@@ -369,6 +371,112 @@ router.get('/records/professional/:address', async (req, res, next) => {
 
     } catch (error) {
         logger.error(`Error fetching records for professional ${req.params.address}:`, error);
+        next(error);
+    }
+});
+
+/**
+ * @route   GET /api/users/access-grants/patient/:address
+ * @desc    Get all active access grants given by a patient, grouped by professional.
+ * @access  Private (Patient only)
+ */
+router.get('/access-grants/patient/:address', async (req, res, next) => {
+    try {
+        const patientAddress = req.params.address.toLowerCase();
+
+        const grants = await AccessGrant.aggregate([
+            // 1. Find all active grants for the specified patient.
+            {
+                $match: {
+                    patientAddress: patientAddress,
+                    expirationTimestamp: { $gt: new Date() }
+                }
+            },
+            // 2. Group grants by the professional they were granted to.
+            {
+                $group: {
+                    _id: '$professionalAddress',
+                    recordIds: { $push: '$recordId' },
+                    grantedAt: { $max: '$createdAt' } // Get the most recent grant time for sorting
+                }
+            },
+            // 3. Join with the 'users' collection to get professional details.
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: '_id',
+                    foreignField: 'address',
+                    as: 'professionalInfo'
+                }
+            },
+            // 4. Join with 'hospitals' to get the professional's hospital name
+            {
+                $lookup: {
+                    from: 'hospitals',
+                    localField: 'professionalInfo.hospitalId',
+                    foreignField: 'hospitalId',
+                    as: 'hospitalInfo'
+                }
+            },
+            // 5. Reshape the output for a clean API response.
+            {
+                $project: {
+                    _id: 0,
+                    professionalAddress: '$_id',
+                    professionalName: { $ifNull: [{ $arrayElemAt: ['$professionalInfo.name', 0] }, "Unknown Professional"] },
+                    hospitalName: { $ifNull: [{ $arrayElemAt: ['$hospitalInfo.name', 0] }, "Independent"] },
+                    recordIds: '$recordIds',
+                    lastGranted: '$grantedAt'
+                }
+            },
+            // 6. Sort by the most recently granted access.
+            { $sort: { lastGranted: -1 } }
+        ]);
+
+        res.json({ success: true, data: grants });
+
+    } catch (error) {
+        logger.error(`Error fetching access grants for patient ${req.params.address}:`, error);
+        next(error);
+    }
+});
+
+// --- [NEW] ENDPOINTS TO SUPPORT PROACTIVE SHARING UI ---
+
+/**
+ * @route   GET /api/hospitals
+ * @desc    Get a list of all verified hospitals.
+ * @access  Public
+ */
+router.get('/hospitals', async (req, res, next) => {
+    try {
+        const hospitals = await Hospital.find({ isVerified: true })
+            .select('hospitalId name')
+            .sort({ name: 1 });
+        res.json({ success: true, data: hospitals });
+    } catch (error) {
+        logger.error('Error fetching hospitals:', error);
+        next(error);
+    }
+});
+
+/**
+ * @route   GET /api/hospitals/:id/professionals
+ * @desc    Get all verified professionals for a specific hospital.
+ * @access  Public
+ */
+router.get('/hospitals/:hospitalId/professionals', async (req, res, next) => {
+    try {
+        const { hospitalId } = req.params;
+        const professionals = await User.find({
+            hospitalId: Number(hospitalId),
+            isVerified: true,
+            role: { $in: ['Doctor', 'LabTechnician'] } // Or other relevant roles
+        }).select('address name role publicKey');
+        
+        res.json({ success: true, data: professionals });
+    } catch (error) {
+        logger.error(`Error fetching professionals for hospital ${req.params.hospitalId}:`, error);
         next(error);
     }
 });

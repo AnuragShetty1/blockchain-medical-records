@@ -6,7 +6,7 @@ import toast from 'react-hot-toast';
 import Image from 'next/image';
 
 import UploadForm from "./UploadForm";
-import AccessManager from "./AccessManager";
+import AccessManagement from "./AccessManagement";
 import RequestManager from "./RequestManager";
 import Profile from "./Profile";
 import RecordList from "./RecordList";
@@ -74,12 +74,7 @@ export default function PatientDashboard() {
                     </div>
                 );
             case 'access':
-                return (
-                    <div className="p-8 bg-white rounded-2xl shadow-xl border border-slate-200">
-                        <h2 className="text-3xl font-bold text-slate-800 mb-6">Access Management</h2>
-                        <AccessManager />
-                    </div>
-                );
+                return <AccessManagement />;
             case 'requests':
                 return (
                     <div className="p-8 bg-white rounded-2xl shadow-xl border border-slate-200">
@@ -202,7 +197,7 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
         const recordActivities = (records || []).map(r => ({
             type: 'Record Added',
             description: `New record uploaded.`,
-            // FIX: Convert BigInt timestamp to a Number in milliseconds.
+            // FIX: Convert BigInt timestamp from seconds to a Number in milliseconds.
             timestamp: Number(r.timestamp) * 1000,
             icon: <UploadIcon />,
             color: 'text-sky-500',
@@ -228,7 +223,7 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
         }));
 
         const allActivities = [...recordActivities, ...accessActivities, ...requestActivities];
-        allActivities.sort((a, b) => b.timestamp - a.timestamp);
+        allActivities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
         setActivity(allActivities.slice(0, 5));
     }, [records, accessList, requests]);

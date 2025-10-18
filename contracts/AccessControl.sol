@@ -19,13 +19,18 @@ contract AccessControl is Roles {
     error RecordNotFound();
     error NotRecordOwner();
     error InputArrayLengthMismatch();
+    error EmptyInputArray();
 
     // --- EVENTS ---
     event AccessGranted(uint256 indexed recordId, address indexed owner, address indexed grantee, uint256 expiration, bytes encryptedDek);
-    event RecordAccessRevoked(uint256 indexed recordId, address indexed professionalAddress);
+    event RecordAccessRevoked(uint256 indexed recordId, address indexed professionalAddress); // Deprecated but kept for compatibility
     event AccessRequested(uint256 indexed requestId, address indexed patient, address indexed provider, string claimId);
     event ProfessionalAccessRequested(uint256 indexed requestId, uint256[] recordIds, address indexed professional, address indexed patient);
     event RequestApproved(uint256 indexed requestId, address indexed patient, uint256 accessDuration);
+
+    // [NEW] Event for revoking multiple records at once.
+    event AccessRevoked(address indexed patient, address indexed professional, uint256[] recordIds);
+
 
     // Internal initializer to set up the parent contract chain.
     function __AccessControl_init(address initialOwner) internal onlyInitializing {
@@ -65,6 +70,7 @@ contract AccessControl is Roles {
      */
     function grantMultipleRecordAccess(uint256[] memory _recordIds, address _grantee, uint256 _durationInDays, bytes[] memory _encryptedDeks) public {
         if (_recordIds.length != _encryptedDeks.length) { revert InputArrayLengthMismatch(); }
+        if (_recordIds.length == 0) { revert EmptyInputArray(); }
 
         User storage grantee = users[_grantee];
         if (
@@ -90,7 +96,7 @@ contract AccessControl is Roles {
     }
 
     /**
-     * @dev Revokes a professional's access to a specific medical record.
+     * @dev [DEPRECATED] Revokes a professional's access to a specific medical record.
      */
     function revokeRecordAccess(uint256 recordId, address professionalAddress) public {
         if (recordId >= records.length) { revert RecordNotFound(); }
@@ -105,6 +111,27 @@ contract AccessControl is Roles {
     }
 
     /**
+     * @dev [NEW] Revokes a professional's access to multiple medical records.
+     * This is the preferred method for revocation.
+     */
+    function revokeMultipleRecordAccess(address professional, uint256[] calldata recordIds) public {
+        if (recordIds.length == 0) { revert EmptyInputArray(); }
+
+        for (uint i = 0; i < recordIds.length; i++) {
+            uint256 recordId = recordIds[i];
+            // We only check for record existence and ownership.
+            // If access doesn't exist, we silently ignore it to prevent unnecessary reverts.
+            if (recordId < records.length && records[recordId].owner == msg.sender) {
+                if(recordAccess[recordId][professional] > 0) {
+                    delete recordAccess[recordId][professional];
+                }
+            }
+        }
+        
+        emit AccessRevoked(msg.sender, professional, recordIds);
+    }
+
+    /**
      * @dev Allows an insurance provider to request access to a patient's records for a claim.
      */
     function requestAccess(address _patientAddress, string memory _claimId) public {
@@ -112,11 +139,11 @@ contract AccessControl is Roles {
        if (users[_patientAddress].role != Role.Patient) { revert NotAPatient(); }
        uint256 requestId = _nextRequestId++;
        patientRequests[_patientAddress].push(AccessRequest({
-           id: requestId,
-           patient: _patientAddress,
-           provider: msg.sender,
-           claimId: _claimId,
-           status: RequestStatus.Pending
+            id: requestId,
+            patient: _patientAddress,
+            provider: msg.sender,
+            claimId: _claimId,
+            status: RequestStatus.Pending
        }));
        emit AccessRequested(requestId, _patientAddress, msg.sender, _claimId);
     }
@@ -189,4 +216,3 @@ contract AccessControl is Roles {
         return patientRequests[_patientAddress][_index];
     }
 }
-

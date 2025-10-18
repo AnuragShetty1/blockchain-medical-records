@@ -9,7 +9,7 @@ const RegistrationRequest = require('../models/RegistrationRequest');
 const User = require('../models/User');
 const Record = require('../models/Record');
 const AccessRequest = require('../models/AccessRequest');
-const AccessGrant = require('../models/AccessGrant'); // <-- FIX: Import the AccessGrant model
+const AccessGrant = require('../models/AccessGrant');
 
 const startIndexer = (wss) => {
 
@@ -237,14 +237,11 @@ const startIndexer = (wss) => {
         }
     });
     
-    // --- FIX: This listener was missing. ---
-    // This will now listen for when a patient approves access and save it to the database.
     contract.on('AccessGranted', async (recordId, owner, grantee, expiration, encryptedDek, event) => {
         try {
             const numericRecordId = Number(recordId);
             logger.info(`[Event] AccessGranted: Record ID ${numericRecordId} from owner ${owner} to grantee ${grantee}`);
 
-            // Use findOneAndUpdate to prevent creating duplicates if the indexer restarts.
             await AccessGrant.findOneAndUpdate(
                 {
                     recordId: numericRecordId,
@@ -256,6 +253,7 @@ const startIndexer = (wss) => {
                     professionalAddress: grantee.toLowerCase(),
                     expirationTimestamp: new Date(Number(expiration) * 1000),
                     rewrappedKey: encryptedDek,
+                    createdAt: new Date(event.log.blockTimestamp * 1000) // Capture grant time
                 },
                 { upsert: true, new: true }
             );
@@ -267,8 +265,25 @@ const startIndexer = (wss) => {
         }
     });
 
+    // --- [NEW] EVENT LISTENER FOR ACCESS REVOCATION ---
+    contract.on('AccessRevoked', async (patient, professional, recordIds, event) => {
+        try {
+            const numericRecordIds = recordIds.map(id => Number(id));
+            logger.info(`[Event] AccessRevoked: Patient ${patient} revoked access for professional ${professional} to record IDs: [${numericRecordIds.join(', ')}]`);
+
+            const result = await AccessGrant.deleteMany({
+                professionalAddress: professional.toLowerCase(),
+                recordId: { $in: numericRecordIds }
+            });
+
+            logger.info(`[Indexer] Successfully deleted ${result.deletedCount} access grant(s) from the database.`);
+
+        } catch (error) {
+            logger.error(`Error processing AccessRevoked event: ${error.message}`);
+        }
+    });
+
     logger.info('Indexer is now listening for blockchain events.');
 };
 
 module.exports = startIndexer;
-
