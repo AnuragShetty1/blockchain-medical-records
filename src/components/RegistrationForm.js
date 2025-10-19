@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useWeb3 } from '@/context/Web3Context';
 import toast from 'react-hot-toast';
+import HospitalRequestPending from './HospitalRequestPending';
 
 const roles = [
     { id: 0, name: 'Patient', description: 'The owner of the medical records.', icon: 'M12 12a5 5 0 110-10 5 5 0 010 10zm0-2a3 3 0 100-6 3 3 0 000 6z', isProfessional: false },
@@ -17,7 +18,7 @@ const roles = [
 const professionalRoles = roles.filter(r => r.isProfessional).map(r => r.id);
 
 export default function RegistrationForm() {
-    const { contract, account, checkUserRegistration } = useWeb3();
+    const { contract, account, checkUserRegistration, userStatus } = useWeb3();
     const [name, setName] = useState('');
     const [selectedRole, setSelectedRole] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -31,6 +32,12 @@ export default function RegistrationForm() {
     const scrollContainerRef = useRef(null);
     const [showLeftArrow, setShowLeftArrow] = useState(false);
     const [showRightArrow, setShowRightArrow] = useState(true);
+
+    // If the user's status is 'pending_hospital', show the pending component instead of this form.
+    // This ensures that after a hospital admin registers, they see the correct status page.
+    if (userStatus === 'pending_hospital') {
+        return <HospitalRequestPending />;
+    }
 
     useEffect(() => {
         const fetchHospitals = async () => {
@@ -245,4 +252,3 @@ export default function RegistrationForm() {
         </div>
     );
 }
-

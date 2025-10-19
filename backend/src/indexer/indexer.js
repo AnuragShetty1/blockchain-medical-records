@@ -11,23 +11,19 @@ const Record = require('../models/Record');
 const AccessRequest = require('../models/AccessRequest');
 const AccessGrant = require('../models/AccessGrant');
 
-// --- NEW: Global error handlers for server stability ---
-
-// Catch any unhandled promise rejections to prevent the server from crashing.
+// --- Global error handlers for server stability ---
 process.on('unhandledRejection', (reason, promise) => {
     logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
-    // It's recommended to restart the process in such cases.
     process.exit(1);
 });
 
-// Ensure the indexer logs a clean shutdown message.
 const gracefulShutdown = () => {
     logger.info('Shutting down indexer gracefully.');
     process.exit(0);
 };
 
-process.on('SIGINT', gracefulShutdown); // Handle Ctrl+C
-process.on('SIGTERM', gracefulShutdown); // Handle kill commands
+process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', gracefulShutdown);
 
 
 const startIndexer = async () => {
@@ -58,9 +54,21 @@ const startIndexer = async () => {
                 for (const event of events) {
                     const [requestId, hospitalName, requesterAddress] = event.args;
                     logger.info(`[Event] RegistrationRequested: ID ${requestId} for ${hospitalName}`);
+                    
+                    // --- MISTAKE ---
+                    // The status was being set to a generic 'pending', which caused the frontend
+                    // to show the wrong status message for hospital admins.
+                    // --- FIX ---
+                    // The status is now correctly set to 'pending_hospital', which allows the
+                    // frontend router in Dashboard.js to display the correct pending component.
                     await RegistrationRequest.findOneAndUpdate(
                         { requestId: Number(requestId) },
-                        { requestId: Number(requestId), hospitalName, requesterAddress, status: 'pending' },
+                        { 
+                            requestId: Number(requestId), 
+                            hospitalName, 
+                            requesterAddress, 
+                            status: 'pending_hospital' // Correct status for a pending hospital
+                        },
                         { upsert: true, new: true }
                     );
                 }
@@ -192,7 +200,6 @@ const startIndexer = async () => {
             try {
                 const events = await contract.queryFilter('AccessGranted', lastProcessedBlock + 1, latestBlock);
                 for (const event of events) {
-                    // FIX: Correctly and efficiently fetch the block timestamp
                     const block = await event.getBlock();
                     if (!block) {
                         logger.warn(`Could not fetch block for event at hash: ${event.transactionHash}`);

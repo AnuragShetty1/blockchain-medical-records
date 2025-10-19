@@ -4,8 +4,6 @@ import { useWeb3 } from "@/context/Web3Context";
 import toast from 'react-hot-toast';
 import Image from 'next/image';
 
-// --- [THE FIX] ---
-// Step 1: Import the new, dedicated patient dashboard component.
 import PatientDashboard from "./PatientDashboard";
 import DoctorDashboard from "./DoctorView";
 import LabTechnicianDashboard from "./LabTechnicianDashboard";
@@ -47,10 +45,16 @@ export default function Dashboard() {
     }
 
     switch (userStatus) {
-        case 'pending_verification':
+        // --- FIX APPLIED ---
+        // 'pending' is for professionals (Doctors, etc.) awaiting affiliation approval.
+        // It should render the generic PendingVerification component.
+        case 'pending':
             return <PendingVerification />;
         
-        case 'pending':
+        // --- FIX APPLIED ---
+        // 'pending_hospital' is specifically for a potential Hospital Admin awaiting
+        // Super Admin approval. It should render the HospitalRequestPending component.
+        case 'pending_hospital':
             return <HospitalRequestPending />;
 
         case 'approved':
@@ -69,24 +73,20 @@ export default function Dashboard() {
                 case 'SuperAdmin':
                     return <SuperAdminDashboard />;
                 case 'Patient':
-                    // --- [THE FIX] ---
-                    // Step 2: Render the new component instead of the old UI.
                     return <PatientDashboard />;
                 default:
                     return <div className="text-center p-10"><p>Dashboard for role "{userProfile.role}" is not yet available.</p></div>;
             }
         
         default:
-            if (userProfile.role === 'Patient') {
-                 // Also route to the new dashboard here for consistency.
-                 return <PatientDashboard />;
-            }
-            return <div className="text-center p-10"><p className="text-xl font-semibold text-slate-700">Your account status is currently: <span className="text-amber-600 font-bold">{userStatus}</span>. You must be approved or set up your keys to proceed.</p></div>;
+            // Fallback for any other unhandled statuses.
+            return <div className="text-center p-10"><p className="text-xl font-semibold text-slate-700">Your account status is currently: <span className="text-amber-600 font-bold">{userStatus}</span>.</p></div>;
     }
 }
 
-// The old patient UI code below is now effectively unreachable and can be safely removed in a future cleanup.
-// No changes are needed here.
+// NOTE: The old patient UI code below is now unreachable because all patient-related statuses
+// are now correctly routed to the new <PatientDashboard /> component. 
+// This code can be safely removed in a future cleanup.
 const NavItem = ({ icon, label, active, onClick, notificationCount = 0 }) => (
     <button
         onClick={onClick}

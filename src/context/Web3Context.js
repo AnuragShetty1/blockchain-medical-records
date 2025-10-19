@@ -234,6 +234,17 @@ export const Web3Provider = ({ children }) => {
         }
     }, [fetchPatientData]);
 
+    // --- [NEW] Function to allow components to manually trigger a profile refresh ---
+    const refetchUserProfile = useCallback(async () => {
+        if (account && contract && signer) {
+            console.log("refetchUserProfile triggered");
+            await checkUserRegistrationAndState(account, contract, signer);
+        } else {
+            console.warn("refetchUserProfile called, but context is not ready.");
+        }
+    }, [account, contract, signer, checkUserRegistrationAndState]);
+
+
     const setupUserSession = useCallback(async (signerInstance, userAddress) => {
         try {
             const address = contractAddressData.MedicalRecords;
@@ -420,6 +431,8 @@ export const Web3Provider = ({ children }) => {
             accessList,
             connectWallet, disconnectWallet, 
             checkUserRegistration: () => checkUserRegistrationAndState(account, contract, signer),
+            // --- [NEW] Expose the new function to the rest of the application ---
+            refetchUserProfile,
             markNotificationsAsRead,
             generateAndSetKeyPair,
             savePublicKeyOnChain,

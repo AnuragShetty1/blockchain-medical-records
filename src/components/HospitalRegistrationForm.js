@@ -5,7 +5,7 @@ import { useWeb3 } from '@/context/Web3Context';
 import toast from 'react-hot-toast';
 
 export default function HospitalRegistrationForm() {
-    const { contract } = useWeb3();
+    const { contract, refetchUserProfile } = useWeb3();
     const [hospitalName, setHospitalName] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
@@ -29,8 +29,12 @@ export default function HospitalRegistrationForm() {
             
             toast.success("Request submitted successfully! A Super Admin will review it shortly.", { id: toastId, duration: 5000 });
             setHospitalName('');
-            // You might want to update the UI to show a "Pending Review" status here.
-            // For now, we just clear the form.
+            
+            // --- FIX APPLIED ---
+            // Immediately refetch the user's profile. This will update their status 
+            // from 'unregistered' to 'pending_hospital', causing the UI to
+            // automatically switch to the HospitalRequestPending component.
+            await refetchUserProfile();
 
         } catch (error) {
             console.error("Hospital registration request failed:", error);
@@ -73,4 +77,3 @@ export default function HospitalRegistrationForm() {
         </div>
     );
 }
-

@@ -12,9 +12,20 @@ const logger = require('../../utils/logger');
  */
 router.get('/requests', async (req, res, next) => {
     try {
+        // --- MISTAKE ---
+        // The query was looking for the generic 'pending' status. This failed to find new 
+        // hospital registration requests after the indexer was updated to use the more 
+        // specific 'pending_hospital' status.
+        // const pendingRequests = await RegistrationRequest.find({ status: { $in: ['pending', 'verifying'] } });
+        
+        // --- FIX ---
+        // The query now specifically looks for the 'pending_hospital' and 'verifying' statuses.
+        // This ensures the Super Admin's dashboard correctly fetches and displays new hospital 
+        // registrations that are waiting for approval or are in the process of being verified.
         const pendingRequests = await RegistrationRequest.find({ 
-            status: { $in: ['pending', 'verifying'] } 
+            status: { $in: ['pending_hospital', 'verifying'] } 
         }).sort({ createdAt: -1 });
+        
         res.json({ success: true, data: pendingRequests });
     } catch (error) {
         logger.error('Error fetching pending requests:', error);
@@ -29,8 +40,6 @@ router.get('/requests', async (req, res, next) => {
  */
 router.get('/hospitals', async (req, res, next) => {
     try {
-        // --- [CHANGE] ---
-        // Now fetches only 'active' hospitals for the professional registration dropdown.
         const verifiedHospitals = await Hospital.find({ 
             status: 'active'
         }).sort({ createdAt: -1 });
@@ -57,8 +66,17 @@ router.post('/verify-hospital', async (req, res, next) => {
     try {
         logger.info(`Verification process started for request ID: ${numericRequestId}`);
 
+        // --- MISTAKE ---
+        // This query was looking for the generic 'pending' status and would fail to find the
+        // correct request to update.
+        // const request = await RegistrationRequest.findOneAndUpdate(
+        //     { requestId: numericRequestId, status: 'pending' }, ...
+
+        // --- FIX ---
+        // The query now correctly finds the request by its 'pending_hospital' status before
+        // updating it to 'verifying'. This allows the verification process to proceed.
         const request = await RegistrationRequest.findOneAndUpdate(
-            { requestId: numericRequestId, status: 'pending' },
+            { requestId: numericRequestId, status: 'pending_hospital' },
             { $set: { status: 'verifying' } },
             { new: true }
         );
@@ -89,7 +107,6 @@ router.post('/verify-hospital', async (req, res, next) => {
     }
 });
 
-// --- [NEW] Revoke Hospital Endpoint ---
 /**
  * @route   POST /api/super-admin/revoke-hospital
  * @desc    Marks a hospital as 'revoking', sends the transaction, and waits for confirmation.
@@ -128,7 +145,6 @@ router.post('/revoke-hospital', async (req, res, next) => {
     } catch (error) {
         logger.error(`On-chain revocation failed for hospital ID ${numericHospitalId}:`, error);
 
-        // Safety Net: If the transaction fails, revert the status back to 'active'.
         await Hospital.findOneAndUpdate(
             { hospitalId: numericHospitalId },
             { $set: { status: 'active' } }
@@ -140,3 +156,4 @@ router.post('/revoke-hospital', async (req, res, next) => {
 });
 
 module.exports = router;
+

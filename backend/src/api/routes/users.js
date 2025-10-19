@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../../models/User');
-const Hospital = require('../../models/Hospital'); // Import Hospital model
+const Hospital = require('../../models/Hospital');
 const RegistrationRequest = require('../../models/RegistrationRequest');
 const Record = require('../../models/Record');
 const AccessRequest = require('../../models/AccessRequest');
@@ -31,13 +31,32 @@ router.get('/status/:address', async (req, res, next) => {
             });
         }
 
-        const pendingRequest = await RegistrationRequest.findOne({
+        // --- MISTAKE ---
+        // The original logic checked for a generic 'pending' status, which is used for 
+        // professional affiliation requests stored in the User collection. It failed to
+        // find new hospital registration requests, which are stored in the RegistrationRequest
+        // collection with a more specific status.
+        // const pendingRequest = await RegistrationRequest.findOne({
+        //     requesterAddress: address,
+        //     status: { $in: ['pending', 'verifying'] }
+        // });
+        // if (pendingRequest) {
+        //     return res.json({ success: true, status: 'pending_verification' });
+        // }
+        
+        // --- FIX ---
+        // This is the crucial correction. After failing to find a User record, the API
+        // now specifically checks the RegistrationRequest collection for a hospital request
+        // that is either 'pending_hospital' or 'verifying'. If found, it correctly returns
+        // the 'pending_hospital' status, which the frontend uses to display the correct pending page.
+        const pendingHospitalRequest = await RegistrationRequest.findOne({
             requesterAddress: address,
-            status: { $in: ['pending', 'verifying'] }
+            status: { $in: ['pending_hospital', 'verifying'] }
         });
 
-        if (pendingRequest) {
-            return res.json({ success: true, status: 'pending_verification' });
+        if (pendingHospitalRequest) {
+            // Return the specific status that the frontend is now expecting.
+            return res.json({ success: true, status: 'pending_hospital' });
         }
 
         return res.json({ success: true, status: 'unregistered' });
@@ -142,12 +161,11 @@ router.post('/register-patient', async (req, res, next) => {
 router.get('/records/patient/:address', async (req, res, next) => {
     try {
         const { address } = req.params;
-        const { q } = req.query; // Search query for title
+        const { q } = req.query; 
 
         let query = { owner: address.toLowerCase() };
 
         if (q) {
-            // Using a case-insensitive regex for a flexible substring search
             query.title = { $regex: q, $options: 'i' };
         }
 
@@ -169,7 +187,6 @@ router.get('/search-patients', async (req, res, next) => {
     try {
         const { q } = req.query;
 
-        // Return empty if the query is too short or missing
         if (!q || q.trim().length < 2) {
             return res.json({ success: true, data: [] });
         }
@@ -187,8 +204,8 @@ router.get('/search-patients', async (req, res, next) => {
         };
 
         const patients = await User.find(searchQuery)
-            .select('address name publicKey') // Select only necessary fields
-            .limit(10); // Limit results for performance
+            .select('address name publicKey')
+            .limit(10); 
 
         res.json({ success: true, data: patients });
 
@@ -208,16 +225,13 @@ router.get('/access-requests/patient/:address', async (req, res, next) => {
     try {
         const patientAddress = req.params.address.toLowerCase();
 
-        // This aggregation pipeline enriches the request data.
         const requests = await AccessRequest.aggregate([
-            // 1. Find all pending requests for the specified patient.
             {
                 $match: {
                     patientAddress: patientAddress,
                     status: 'pending'
                 }
             },
-            // 2. Join with the 'users' collection to get the professional's name.
             {
                 $lookup: {
                     from: 'users',
@@ -226,7 +240,6 @@ router.get('/access-requests/patient/:address', async (req, res, next) => {
                     as: 'professionalInfo'
                 }
             },
-            // 3. Join with the 'records' collection to get details of the requested records.
             {
                 $lookup: {
                     from: 'records',
@@ -235,7 +248,6 @@ router.get('/access-requests/patient/:address', async (req, res, next) => {
                     as: 'recordInfo'
                 }
             },
-            // 4. Reshape the output for a clean API response.
             {
                 $project: {
                     _id: 0,
@@ -255,7 +267,6 @@ router.get('/access-requests/patient/:address', async (req, res, next) => {
                     createdAt: '$createdAt'
                 }
             },
-            // 5. Sort by most recent request.
             { $sort: { createdAt: -1 } }
         ]);
 
@@ -275,7 +286,7 @@ router.get('/access-requests/patient/:address', async (req, res, next) => {
  */
 router.post('/access-requests/respond', async (req, res, next) => {
     try {
-        const { requestId, response } = req.body; // response should be 'approved' or 'rejected'
+        const { requestId, response } = req.body; 
 
         if (requestId === undefined || !['approved', 'rejected'].includes(response)) {
             return res.status(400).json({ success: false, message: 'Invalid request ID or response.' });
@@ -286,8 +297,6 @@ router.post('/access-requests/respond', async (req, res, next) => {
         if (!request) {
             return res.status(404).json({ success: false, message: 'Pending request not found.' });
         }
-
-        // TODO: Add authentication check to ensure `msg.sender` owns this request.
 
         request.status = response;
         await request.save();
@@ -319,7 +328,6 @@ router.get('/records/professional/:address', async (req, res, next) => {
             return res.json({ success: true, data: [] });
         }
         
-        // Group grants by patient address
         const grantsByPatient = grants.reduce((acc, grant) => {
             const patientAddr = grant.patientAddress;
             if (!acc[patientAddr]) {
@@ -331,7 +339,6 @@ router.get('/records/professional/:address', async (req, res, next) => {
         
         const patientAddresses = Object.keys(grantsByPatient);
 
-        // Fetch user and record details in parallel
         const [patients, allRecords] = await Promise.all([
              User.find({ address: { $in: patientAddresses } }).select('name address'),
              Record.find({ recordId: { $in: grants.map(g => g.recordId) } })
@@ -352,11 +359,10 @@ router.get('/records/professional/:address', async (req, res, next) => {
             const patientRecords = patientGrants
                 .map(grant => {
                     const record = recordsMap[grant.recordId];
-                    if (!record) return null; // Handle case where record might not be found
-                    // Attach the rewrapped key for decryption on the frontend
+                    if (!record) return null;
                     return { ...record.toObject(), rewrappedKey: grant.rewrappedKey };
                 })
-                .filter(Boolean); // Filter out any nulls
+                .filter(Boolean); 
             
             return {
                 patient: {
@@ -385,22 +391,19 @@ router.get('/access-grants/patient/:address', async (req, res, next) => {
         const patientAddress = req.params.address.toLowerCase();
 
         const grants = await AccessGrant.aggregate([
-            // 1. Find all active grants for the specified patient.
             {
                 $match: {
                     patientAddress: patientAddress,
                     expirationTimestamp: { $gt: new Date() }
                 }
             },
-            // 2. Group grants by the professional they were granted to.
             {
                 $group: {
                     _id: '$professionalAddress',
                     recordIds: { $push: '$recordId' },
-                    grantedAt: { $max: '$createdAt' } // Get the most recent grant time for sorting
+                    grantedAt: { $max: '$createdAt' } 
                 }
             },
-            // 3. Join with the 'users' collection to get professional details.
             {
                 $lookup: {
                     from: 'users',
@@ -409,7 +412,6 @@ router.get('/access-grants/patient/:address', async (req, res, next) => {
                     as: 'professionalInfo'
                 }
             },
-            // 4. Join with 'hospitals' to get the professional's hospital name
             {
                 $lookup: {
                     from: 'hospitals',
@@ -418,7 +420,6 @@ router.get('/access-grants/patient/:address', async (req, res, next) => {
                     as: 'hospitalInfo'
                 }
             },
-            // 5. Reshape the output for a clean API response.
             {
                 $project: {
                     _id: 0,
@@ -429,7 +430,6 @@ router.get('/access-grants/patient/:address', async (req, res, next) => {
                     lastGranted: '$grantedAt'
                 }
             },
-            // 6. Sort by the most recently granted access.
             { $sort: { lastGranted: -1 } }
         ]);
 
@@ -440,8 +440,6 @@ router.get('/access-grants/patient/:address', async (req, res, next) => {
         next(error);
     }
 });
-
-// --- [NEW] ENDPOINTS TO SUPPORT PROACTIVE SHARING UI ---
 
 /**
  * @route   GET /api/hospitals
@@ -471,7 +469,7 @@ router.get('/hospitals/:hospitalId/professionals', async (req, res, next) => {
         const professionals = await User.find({
             hospitalId: Number(hospitalId),
             isVerified: true,
-            role: { $in: ['Doctor', 'LabTechnician'] } // Or other relevant roles
+            role: { $in: ['Doctor', 'LabTechnician'] } 
         }).select('address name role publicKey');
         
         res.json({ success: true, data: professionals });
@@ -482,10 +480,10 @@ router.get('/hospitals/:hospitalId/professionals', async (req, res, next) => {
 });
 
 /**
- * @route   POST /api/users/records/details
- * @desc    Get specific details for a list of records by their IDs.
- * @access  Private (Authenticated user)
- */
+ * @route   POST /api/users/records/details
+ * @desc    Get specific details for a list of records by their IDs.
+ * @access  Private (Authenticated user)
+ */
 router.post('/records/details', async (req, res, next) => {
     try {
         const { recordIds } = req.body;
@@ -496,7 +494,7 @@ router.post('/records/details', async (req, res, next) => {
 
         const records = await Record.find({
             recordId: { $in: recordIds }
-        }).select('recordId encryptedSymmetricKey'); // Select only the fields needed
+        }).select('recordId encryptedSymmetricKey'); 
 
         res.json({ success: true, data: records });
 
@@ -508,4 +506,3 @@ router.post('/records/details', async (req, res, next) => {
 
 
 module.exports = router;
-
