@@ -8,12 +8,19 @@ let contract;
 let signer;
 
 // Mapping of human-readable role strings to the numerical enum index in Solidity.
+// FIX: The ROLE_MAP has been corrected to match the enum in Storage.sol.
+// This ensures the correct integer is sent to the smart contract for each role.
 const ROLE_MAP = {
     'Patient': 0,
     'Doctor': 1,
-    'LabTechnician': 2,
-    'HospitalAdmin': 3,
-    'SuperAdmin': 4,
+    'HospitalAdmin': 2,
+    'InsuranceProvider': 3,
+    'Pharmacist': 4,
+    'Researcher': 5,
+    'Guardian': 6,
+    'LabTechnician': 7,
+    'Lab Technician': 7, // Added to handle the string from the frontend
+    'SuperAdmin': 8,
 };
 
 const init = () => {
