@@ -1,72 +1,60 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-import axios from 'axios';
 import RegistrationForm from "@/components/RegistrationForm";
 import Dashboard from "@/components/Dashboard";
-import SuperAdminDashboard from "@/components/SuperAdminDashboard"; // [FIX] Ensure SuperAdminDashboard is imported
+import SuperAdminDashboard from "@/components/SuperAdminDashboard";
 import DashboardSkeleton from "@/components/DashboardSkeleton";
-import HospitalRegistrationForm from "@/components/HospitalRegistrationForm";
 import HospitalRequestPending from "@/components/HospitalRequestPending";
 import { useWeb3 } from "@/context/Web3Context";
 import Image from 'next/image';
+import PendingVerification from '@/components/PendingVerification';
 
 export default function Home() {
-    const { account, isRegistered, userProfile, owner, isLoadingProfile } = useWeb3();
-    const [userStatus, setUserStatus] = useState(null);
-    const [isStatusLoading, setIsStatusLoading] = useState(true);
-
-    useEffect(() => {
-        const checkUserStatus = async () => {
-            if (account) {
-                setIsStatusLoading(true);
-                try {
-                    const response = await axios.get(`http://localhost:3001/api/users/status/${account}`);
-                    setUserStatus(response.data.status);
-                } catch (error) {
-                    console.error("Failed to fetch user status:", error);
-                    setUserStatus('unregistered');
-                } finally {
-                    setIsStatusLoading(false);
-                }
-            } else {
-                setUserStatus(null);
-                setIsStatusLoading(false);
-            }
-        };
-
-        checkUserStatus();
-    }, [account]);
-
+    // --- MISTAKE ---
+    // The component was managing its own local `userStatus` state (`const [userStatus, setUserStatus] = useState(null);`).
+    // This local state was fetched only once when the user connected their wallet and was NOT updated when the 
+    // central Web3Context state changed after registration. This caused the UI to remain stuck on the registration page.
+    
+    // --- FIX ---
+    // The local state and the useEffect that managed it have been removed. The component now
+    // gets the `userStatus` directly from the `useWeb3` hook. Because the context is the single
+    // source of truth, when `refetchUserProfile()` is called after registration, this component
+    // will now automatically re-render with the new, correct status from the context and display the pending page.
+    const { account, isRegistered, userProfile, owner, isLoadingProfile, userStatus } = useWeb3();
 
     const renderContent = () => {
-        if (isLoadingProfile || isStatusLoading) {
+        // Use isLoadingProfile from the context, which now correctly reflects the entire profile loading process.
+        if (isLoadingProfile) {
             return <DashboardSkeleton />;
         }
 
-        // [CRITICAL FIX] SuperAdmin Check MUST be here and return the specific dashboard component.
-        // This bypasses the need for a MongoDB profile (userProfile).
+        // Super Admin check remains the same.
         if (account && owner && account.toLowerCase() === owner.toLowerCase()) {
             return <SuperAdminDashboard />;
         }
 
-        // If not SuperAdmin, check for general registration/user status.
+        // Registered user check remains the same.
         if (isRegistered && userProfile) {
-            // The Dashboard component now handles all other roles (Admin, Doctor, Patient, etc.)
             return <Dashboard />;
         }
 
+        // The logic now correctly uses the reactive `userStatus` from the context.
         if (account) {
             switch (userStatus) {
-                case 'pending_verification':
-                    return <HospitalRequestPending />; // Use the correctly named component
                 case 'unregistered':
                     return <RegistrationViews />;
+                case 'pending_hospital':
+                case 'rejected':
+                    return <HospitalRequestPending />;
+                case 'pending':
+                     return <PendingVerification />;
                 default:
+                    // This handles the initial loading state before the user's status is determined by the context.
                     return <DashboardSkeleton />;
             }
         }
 
+        // If no account is connected, show the welcome message.
         return <WelcomeMessage />;
     };
 
@@ -104,16 +92,8 @@ export default function Home() {
                     </li>
                 </ul>
             </div>
-
-            {/* Right Side: Registration Forms */}
-            <div className="space-y-8">
+            <div>
                 <RegistrationForm />
-                <div className="w-full flex items-center">
-                    <span className="flex-grow bg-slate-300 h-px"></span>
-                    <span className="mx-4 text-slate-500 font-semibold">OR</span>
-                    <span className="flex-grow bg-slate-300 h-px"></span>
-                </div>
-                <HospitalRegistrationForm />
             </div>
         </div>
     );
@@ -123,11 +103,11 @@ export default function Home() {
             <div className="flex flex-col items-center justify-center space-y-4">
                 <div className="flex items-center space-x-3">
                     <h1 className="text-3xl font-bold text-gray-800 flex gap-1 justify-center items-center">Welcome to PRISM<Image
-                        src="/logo.png"
-                        alt="PRISM Logo"
-                        width={50}
-                        height={50}
-                    /></h1>
+                            src="/logo.png"
+                            alt="PRISM Logo"
+                            width={50}
+                            height={50}
+                        /></h1>
                 </div>
 
                 <p className="text-2xl font-bold font-semibold text-gray-600">
@@ -146,3 +126,4 @@ export default function Home() {
         </div>
     );
 }
+

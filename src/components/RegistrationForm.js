@@ -4,8 +4,21 @@ import { useState, useRef, useEffect } from 'react';
 import { useWeb3 } from '@/context/Web3Context';
 import toast from 'react-hot-toast';
 import HospitalRequestPending from './HospitalRequestPending';
+// --- FIX: Step 1 ---
+// Import the HospitalRegistrationForm to embed it directly within this component.
+import HospitalRegistrationForm from './HospitalRegistrationForm';
+
 
 const roles = [
+    // --- MISTAKE ---
+    // The previous component design had no clear, integrated way for a user to start the 
+    // hospital registration process, leading to a disconnected and buggy user experience.
+
+    // --- FIX: Step 2 ---
+    // A new, special "role" is added to the list. This isn't a real user role for the
+    // smart contract but a UI trigger. When selected, it will display the hospital
+    // registration form instead of the standard user form, unifying the two flows.
+    { id: 'register_hospital', name: 'Register Hospital', description: 'Become a Hospital Administrator for your organization.', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4', isProfessional: false },
     { id: 0, name: 'Patient', description: 'The owner of the medical records.', icon: 'M12 12a5 5 0 110-10 5 5 0 010 10zm0-2a3 3 0 100-6 3 3 0 000 6z', isProfessional: false },
     { id: 1, name: 'Doctor', description: 'A verified healthcare professional.', icon: 'M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 10V9a2 2 0 00-2-2h-3m-4 0V4a2 2 0 012-2h4a2 2 0 012 2v2', isProfessional: true },
     { id: 7, name: 'Lab Technician', description: 'Uploads verified lab test results.', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4', isProfessional: true },
@@ -33,9 +46,7 @@ export default function RegistrationForm() {
     const [showLeftArrow, setShowLeftArrow] = useState(false);
     const [showRightArrow, setShowRightArrow] = useState(true);
 
-    // If the user's status is 'pending_hospital', show the pending component instead of this form.
-    // This ensures that after a hospital admin registers, they see the correct status page.
-    if (userStatus === 'pending_hospital') {
+    if (userStatus === 'pending_hospital' || userStatus === 'rejected') {
         return <HospitalRequestPending />;
     }
 
@@ -143,16 +154,12 @@ export default function RegistrationForm() {
                 toast.success('Request submitted! Please wait for admin approval.', { id: toastId });
 
             } else {
-                // --- [THE FIX] ---
-                // This logic now mirrors the professional flow for robustness.
-                // Step 1: On-chain transaction.
                 toast.loading('Step 1/2: Creating on-chain identity...', { id: toastId });
                 if (!contract) { throw new Error('Contract not initialized.'); }
                 const tx = await contract.registerUser(name, selectedRole);
                 await tx.wait();
                 toast.success('On-chain identity created!', { id: toastId });
                 
-                // Step 2: Explicitly create the user in the database via the new API endpoint.
                 toast.loading('Step 2/2: Setting up your account...', { id: toastId });
                 const response = await fetch('http://localhost:3001/api/users/register-patient', {
                     method: 'POST',
@@ -170,7 +177,6 @@ export default function RegistrationForm() {
                 toast.success('Account setup complete! Redirecting...', { id: toastId });
             }
             
-            // This refresh is now guaranteed to find the user record created by the API call.
             await checkUserRegistration();
 
         } catch (error) {
@@ -187,7 +193,7 @@ export default function RegistrationForm() {
     return (
         <div className="w-full max-w-2xl p-8 space-y-6 bg-white rounded-2xl shadow-xl border border-slate-200">
             <h2 className="text-3xl font-bold text-center text-slate-900">Create Your Account</h2>
-            <p className="text-center text-slate-500">First, choose your primary role in the ecosystem.</p>
+            <p className="text-center text-slate-500">First, choose your primary role or action in the ecosystem.</p>
 
             <div className="relative">
                 {showLeftArrow && (
@@ -198,7 +204,7 @@ export default function RegistrationForm() {
                 <div ref={scrollContainerRef} className="flex gap-4 overflow-x-auto p-4" style={{ scrollbarWidth: 'none', 'msOverflowStyle': 'none' }}>
                     {roles.map((role) => (
                         <button key={role.id} type="button" onClick={() => setSelectedRole(role.id)}
-                            className={`flex-shrink-0 w-40 p-4 border rounded-lg text-center transition-all duration-200 shadow-md hover:shadow-lg hover:-translate-y-1 ${selectedRole === role.id ? 'border-teal-500 bg-teal-50 ring-2 ring-teal-500' : 'border-slate-300 bg-slate-50'}`}>
+                            className={`flex-shrink-0 w-44 p-4 border rounded-lg text-center transition-all duration-200 shadow-md hover:shadow-lg hover:-translate-y-1 ${selectedRole === role.id ? 'border-teal-500 bg-teal-50 ring-2 ring-teal-500' : 'border-slate-300 bg-slate-50'}`}>
                             <svg className={`w-8 h-8 mx-auto mb-2 ${selectedRole === role.id ? 'text-teal-600' : 'text-slate-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={role.icon}></path></svg>
                             <h3 className="font-semibold text-slate-800">{role.name}</h3>
                             <p className="text-xs text-slate-500 h-10">{role.description}</p>
@@ -211,44 +217,56 @@ export default function RegistrationForm() {
                     </button>
                 )}
             </div>
-
-            <form onSubmit={handleSubmit} className="space-y-6 pt-4">
-                <div className="relative">
-                    <svg className="w-6 h-6 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
-                    <input id="name" type="text" value={name} onChange={(e) => setName(e.target.value)}
-                        className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500"
-                        placeholder="Enter your full name" required />
+            
+            {/* --- FIX: Step 3 --- */}
+            {/* Conditional rendering is now used. If the user selects the special 'register_hospital' role, */}
+            {/* the <HospitalRegistrationForm /> is rendered. Otherwise, the standard user registration form is shown. */}
+            {/* This unifies the two flows into a single, seamless component, fixing both the duplicate UI and the */}
+            {/* automatic page transition bug. */}
+            {selectedRole === 'register_hospital' ? (
+                <div className="pt-4">
+                    <HospitalRegistrationForm />
                 </div>
-                
-                {isProfessionalRoleSelected && (
-                    <div className="relative" ref={hospitalDropdownRef}>
-                        <svg className="w-6 h-6 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 z-10" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
-                        <input type="text" value={hospitalSearch}
-                            onChange={(e) => { setHospitalSearch(e.target.value); setSelectedHospital(''); setIsDropdownOpen(true); }}
-                            onFocus={() => setIsDropdownOpen(true)}
-                            placeholder="Search and select your hospital"
-                            className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500 bg-white" />
-                        {isDropdownOpen && (
-                            <div className="absolute z-20 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                                {filteredHospitals.length > 0 ? (
-                                    filteredHospitals.map((hospital) => (
-                                        <button key={hospital._id} type="button" className="w-full text-left px-4 py-2 hover:bg-teal-50"
-                                            onClick={() => { setHospitalSearch(hospital.name); setSelectedHospital(hospital.hospitalId); setIsDropdownOpen(false); }}>
-                                            {hospital.name}
-                                        </button>
-                                    ))
-                                ) : ( <p className="px-4 py-2 text-slate-500">No hospitals found.</p> )}
-                            </div>
-                        )}
+            ) : (
+                <form onSubmit={handleSubmit} className="space-y-6 pt-4">
+                    <div className="relative">
+                        <svg className="w-6 h-6 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+                        <input id="name" type="text" value={name} onChange={(e) => setName(e.target.value)}
+                            className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500"
+                            placeholder="Enter your full name" required />
                     </div>
-                )}
-                
-                <div>
-                    <button type="submit" disabled={isLoading} className="w-full px-4 py-3 font-bold text-white bg-teal-600 rounded-lg hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:bg-slate-400 transition-colors shadow-lg hover:shadow-xl">
-                        {isLoading ? 'Processing...' : (isProfessionalRoleSelected ? 'Request Affiliation' : 'Create On-Chain Identity')}
-                    </button>
-                </div>
-            </form>
+                    
+                    {isProfessionalRoleSelected && (
+                        <div className="relative" ref={hospitalDropdownRef}>
+                            <svg className="w-6 h-6 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 z-10" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
+                            <input type="text" value={hospitalSearch}
+                                onChange={(e) => { setHospitalSearch(e.target.value); setSelectedHospital(''); setIsDropdownOpen(true); }}
+                                onFocus={() => setIsDropdownOpen(true)}
+                                placeholder="Search and select your hospital"
+                                className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500 bg-white" />
+                            {isDropdownOpen && (
+                                <div className="absolute z-20 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                                    {filteredHospitals.length > 0 ? (
+                                        filteredHospitals.map((hospital) => (
+                                            <button key={hospital._id} type="button" className="w-full text-left px-4 py-2 hover:bg-teal-50"
+                                                onClick={() => { setHospitalSearch(hospital.name); setSelectedHospital(hospital.hospitalId); setIsDropdownOpen(false); }}>
+                                                {hospital.name}
+                                            </button>
+                                        ))
+                                    ) : ( <p className="px-4 py-2 text-slate-500">No hospitals found.</p> )}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    
+                    <div>
+                        <button type="submit" disabled={isLoading || selectedRole === null} className="w-full px-4 py-3 font-bold text-white bg-teal-600 rounded-lg hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:bg-slate-400 transition-colors shadow-lg hover:shadow-xl">
+                            {isLoading ? 'Processing...' : (isProfessionalRoleSelected ? 'Request Affiliation' : 'Create On-Chain Identity')}
+                        </button>
+                    </div>
+                </form>
+            )}
         </div>
     );
 }
+
