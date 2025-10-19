@@ -6,11 +6,14 @@ import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { hybridDecrypt } from '@/utils/crypto';
 import axios from 'axios';
+import ShareRecordsModal from './ShareRecordsModal';
 
 // --- ICONS ---
 const ViewIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.432 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>;
 const SpinnerIcon = () => <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>;
 const Spinner = () => <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-500"></div>;
+const ShareIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 4.186m0-4.186c.105.022.213.04.324.058m-3.248 4.07c.11-.018.218-.036.324-.058m3.248-4.07a2.25 2.25 0 014.186 0m-4.186 0c.213.04.425.083.638.125m-6.38 3.82c.213-.042.425-.083.638-.125m3.248 4.07c.11-.018.218-.036.324-.058m-3.248-4.07c.105.022.213.04.324.058m0 0c1.282.23 2.52.23 3.802 0m0 0a2.25 2.25 0 014.186 0m-4.186 0c.213.04.425.083.638.125m-6.38 3.82c.213-.042.425-.083.638-.125m3.248 4.07c.11-.018.218-.036.324-.058m-3.248-4.07c.105.022.213.04.324.058" /></svg>;
+
 
 // --- CONFIGURATION ---
 const CATEGORIES = [
@@ -43,6 +46,10 @@ export default function RecordList({ searchQuery }) {
     const [isLoading, setIsLoading] = useState(true);
     const [decryptionStates, setDecryptionStates] = useState({});
     const [selectedCategory, setSelectedCategory] = useState('all');
+    
+    // --- NEW: State for sharing functionality ---
+    const [selectedRecordsForSharing, setSelectedRecordsForSharing] = useState([]);
+    const [isShareModalOpen, setIsShareModalOpen] = useState(false);
 
     // Effect for initial load and search
     useEffect(() => {
@@ -89,6 +96,17 @@ export default function RecordList({ searchQuery }) {
         }
         return records.filter(record => record.category === selectedCategory);
     }, [records, selectedCategory]);
+
+    // --- NEW: Handler for selecting records to share ---
+    const handleRecordSelectToggle = (recordId) => {
+        setSelectedRecordsForSharing(prevSelected => {
+            if (prevSelected.includes(recordId)) {
+                return prevSelected.filter(id => id !== recordId);
+            } else {
+                return [...prevSelected, recordId];
+            }
+        });
+    };
 
     const handleDecryptAndView = async (record) => {
         if (!keyPair?.privateKey) {
@@ -141,7 +159,6 @@ export default function RecordList({ searchQuery }) {
 
     return (
         <div>
-            {/* --- NEW CATEGORY DROPDOWN FILTER --- */}
             <div className="mb-6 pb-4 border-b border-slate-200">
                 <label htmlFor="category-filter" className="block text-sm font-medium text-slate-700 mb-1">
                     Filter by Category
@@ -160,6 +177,18 @@ export default function RecordList({ searchQuery }) {
                 </select>
             </div>
 
+            {/* --- NEW: Share Button and control section --- */}
+            <div className="my-6">
+                 <button
+                    onClick={() => setIsShareModalOpen(true)}
+                    disabled={selectedRecordsForSharing.length === 0}
+                    className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:bg-slate-400 disabled:cursor-not-allowed transition-colors shadow-sm"
+                >
+                    <ShareIcon />
+                    Share Selected ({selectedRecordsForSharing.length})
+                </button>
+            </div>
+
             {filteredRecords.length === 0 ? (
                 <div className="text-center p-12 bg-slate-50 rounded-lg">
                     <p className="font-semibold text-slate-600">No records found.</p>
@@ -172,6 +201,17 @@ export default function RecordList({ searchQuery }) {
                     {filteredRecords.map((record) => (
                         <div key={record.recordId} className="flex items-start justify-between p-4 hover:bg-slate-50 transition-colors">
                             <div className="flex items-start gap-4 flex-1 min-w-0">
+                                {/* --- NEW: Checkbox for selection --- */}
+                                <div className="flex-shrink-0 pt-1">
+                                     <input
+                                        type="checkbox"
+                                        id={`record-select-${record.recordId}`}
+                                        checked={selectedRecordsForSharing.includes(record.recordId)}
+                                        onChange={() => handleRecordSelectToggle(record.recordId)}
+                                        className="h-5 w-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                    />
+                                </div>
+                                
                                 <div className={`flex-shrink-0 w-12 h-12 rounded-lg flex items-center justify-center text-2xl ${getCategoryStyle(record.category).color}`}>
                                     {CATEGORIES.find(c => c.id === record.category)?.icon || '📁'}
                                 </div>
@@ -211,6 +251,18 @@ export default function RecordList({ searchQuery }) {
                         </div>
                     ))}
                 </div>
+            )}
+
+            {/* --- FIX: Pass the 'records' state to the modal --- */}
+            {isShareModalOpen && (
+                <ShareRecordsModal
+                    records={records}
+                    recordsToShare={selectedRecordsForSharing}
+                    onClose={() => {
+                        setIsShareModalOpen(false);
+                        setSelectedRecordsForSharing([]); // Clear selection on close
+                    }}
+                />
             )}
         </div>
     );

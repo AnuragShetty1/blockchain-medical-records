@@ -481,6 +481,31 @@ router.get('/hospitals/:hospitalId/professionals', async (req, res, next) => {
     }
 });
 
+/**
+ * @route   POST /api/users/records/details
+ * @desc    Get specific details for a list of records by their IDs.
+ * @access  Private (Authenticated user)
+ */
+router.post('/records/details', async (req, res, next) => {
+    try {
+        const { recordIds } = req.body;
+
+        if (!recordIds || !Array.isArray(recordIds) || recordIds.length === 0) {
+            return res.status(400).json({ success: false, message: 'Record IDs must be provided as a non-empty array.' });
+        }
+
+        const records = await Record.find({
+            recordId: { $in: recordIds }
+        }).select('recordId encryptedSymmetricKey'); // Select only the fields needed
+
+        res.json({ success: true, data: records });
+
+    } catch (error) {
+        logger.error(`Error fetching record details:`, error);
+        next(error);
+    }
+});
+
 
 module.exports = router;
 
