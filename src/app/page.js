@@ -8,37 +8,26 @@ import HospitalRequestPending from "@/components/HospitalRequestPending";
 import { useWeb3 } from "@/context/Web3Context";
 import Image from 'next/image';
 import PendingVerification from '@/components/PendingVerification';
+// --- FIX ---
+// Import the new component that will be displayed to revoked users.
+import AccessRevoked from "@/components/AccessRevoked";
 
 export default function Home() {
-    // --- MISTAKE ---
-    // The component was managing its own local `userStatus` state (`const [userStatus, setUserStatus] = useState(null);`).
-    // This local state was fetched only once when the user connected their wallet and was NOT updated when the 
-    // central Web3Context state changed after registration. This caused the UI to remain stuck on the registration page.
-    
-    // --- FIX ---
-    // The local state and the useEffect that managed it have been removed. The component now
-    // gets the `userStatus` directly from the `useWeb3` hook. Because the context is the single
-    // source of truth, when `refetchUserProfile()` is called after registration, this component
-    // will now automatically re-render with the new, correct status from the context and display the pending page.
     const { account, isRegistered, userProfile, owner, isLoadingProfile, userStatus } = useWeb3();
 
     const renderContent = () => {
-        // Use isLoadingProfile from the context, which now correctly reflects the entire profile loading process.
         if (isLoadingProfile) {
             return <DashboardSkeleton />;
         }
 
-        // Super Admin check remains the same.
         if (account && owner && account.toLowerCase() === owner.toLowerCase()) {
             return <SuperAdminDashboard />;
         }
 
-        // Registered user check remains the same.
         if (isRegistered && userProfile) {
             return <Dashboard />;
         }
 
-        // The logic now correctly uses the reactive `userStatus` from the context.
         if (account) {
             switch (userStatus) {
                 case 'unregistered':
@@ -47,7 +36,19 @@ export default function Home() {
                 case 'rejected':
                     return <HospitalRequestPending />;
                 case 'pending':
-                     return <PendingVerification />;
+                    return <PendingVerification />;
+                
+                // --- MISTAKE ---
+                // The main application router did not have a case for the 'revoked' status. When a user
+                // with this status connected, they were no longer considered "registered", so the logic
+                // fell through to the default case, which rendered a loading skeleton, appearing as a blank page.
+                // --- FIX ---
+                // A new `case` is added for the 'revoked' status. This ensures that when the main router
+                // detects a revoked user, it immediately renders the `AccessRevoked` component,
+                // correctly blocking them and displaying the appropriate message. This completes the fix.
+                case 'revoked':
+                    return <AccessRevoked />;
+
                 default:
                     // This handles the initial loading state before the user's status is determined by the context.
                     return <DashboardSkeleton />;
@@ -103,11 +104,11 @@ export default function Home() {
             <div className="flex flex-col items-center justify-center space-y-4">
                 <div className="flex items-center space-x-3">
                     <h1 className="text-3xl font-bold text-gray-800 flex gap-1 justify-center items-center">Welcome to PRISM<Image
-                            src="/logo.png"
-                            alt="PRISM Logo"
-                            width={50}
-                            height={50}
-                        /></h1>
+                        src="/logo.png"
+                        alt="PRISM Logo"
+                        width={50}
+                        height={50}
+                    /></h1>
                 </div>
 
                 <p className="text-2xl font-bold font-semibold text-gray-600">
@@ -126,3 +127,4 @@ export default function Home() {
         </div>
     );
 }
+

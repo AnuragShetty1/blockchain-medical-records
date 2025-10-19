@@ -55,12 +55,6 @@ const startIndexer = async () => {
                     const [requestId, hospitalName, requesterAddress] = event.args;
                     logger.info(`[Event] RegistrationRequested: ID ${requestId} for ${hospitalName}`);
                     
-                    // --- MISTAKE ---
-                    // The status was being set to a generic 'pending', which caused the frontend
-                    // to show the wrong status message for hospital admins.
-                    // --- FIX ---
-                    // The status is now correctly set to 'pending_hospital', which allows the
-                    // frontend router in Dashboard.js to display the correct pending component.
                     await RegistrationRequest.findOneAndUpdate(
                         { requestId: Number(requestId) },
                         { 
@@ -111,11 +105,30 @@ const startIndexer = async () => {
                     const [hospitalId] = event.args;
                     const numericHospitalId = Number(hospitalId);
                     logger.info(`[Event] HospitalRevoked: ID ${numericHospitalId}.`);
+                    
+                    // --- MISTAKE ---
+                    // The original code only updated the hospital's status but did not handle the professionals
+                    // associated with that hospital. This left a security hole where professionals could still
+                    // access the system even after their parent institution was revoked.
                     await Hospital.findOneAndUpdate(
                         { hospitalId: numericHospitalId, status: 'revoking' },
                         { $set: { status: 'revoked', isVerified: false } },
                         { new: true }
                     );
+
+                    // --- FIX ---
+                    // A new step is added to perform a cascading revocation. After the hospital is marked
+                    // as revoked, this code finds all users (professionals and the admin) affiliated with that
+                    // hospitalId and updates their `professionalStatus` to 'revoked'. This ensures that all
+                    // access for that hospital's staff is immediately and automatically cut off.
+                    const updateResult = await User.updateMany(
+                        { hospitalId: numericHospitalId },
+                        { $set: { professionalStatus: 'revoked', isVerified: false } }
+                    );
+
+                    if (updateResult.modifiedCount > 0) {
+                        logger.info(`[Cascading Revoke] Revoked ${updateResult.modifiedCount} professionals for Hospital ID ${numericHospitalId}.`);
+                    }
                 }
             } catch (e) { logger.error('Error polling HospitalRevoked:', e.message); }
 
@@ -246,4 +259,3 @@ const startIndexer = async () => {
 };
 
 module.exports = startIndexer;
-

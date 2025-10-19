@@ -173,7 +173,19 @@ export const Web3Provider = ({ children }) => {
             
             setUserStatus(data.status);
 
-            if (data.status !== 'unregistered') {
+            // --- MISTAKE ---
+            // The original logic did not correctly handle the 'revoked' status. A user with this status
+            // might still have `isRegistered` set to `true` from a previous session, allowing them to
+            // see their dashboard instead of being blocked.
+            // --- FIX ---
+            // A specific check for 'revoked' is added. If a user's status is revoked, we now
+            // explicitly set `isRegistered` to `false`. This is the key change that ensures the
+            // main routing components (`Dashboard.js` and `page.js`) will correctly identify the
+            // user as unauthorized and redirect them to the `AccessRevoked` component.
+            if (data.status === 'revoked') {
+                setIsRegistered(false);
+                setUserProfile(null); // Clear profile for a revoked user
+            } else if (data.status !== 'unregistered') {
                 setIsRegistered(true);
                 // Construct a profile object that matches the old structure for compatibility
                 const fullProfile = {
@@ -197,23 +209,15 @@ export const Web3Provider = ({ children }) => {
                     
                     const keyMissingInDB = !fullProfile.publicKey || fullProfile.publicKey === "";
                     
-                    // --- [FIX APPLIED] ---
-                    // The condition now ONLY checks the database record (`keyMissingInDB`).
-                    // This enforces the database as the single source of truth for whether the
-                    // security setup is complete, preventing the app from skipping the setup step
-                    // if keys only exist in local storage from a previously failed attempt.
                     if (keyMissingInDB) {
                         setNeedsPublicKeySetup(true);
                     } else {
                         setNeedsPublicKeySetup(false);
-                        // Fetch detailed patient data only if the role is Patient and setup is complete
                         if (fullProfile.role === "Patient") {
                             await fetchPatientData(userAddress, contractInstance);
                         }
                     }
                 } else {
-                    // For users who are pending, unregistered, or have roles that don't need keys (e.g., admins),
-                    // ensure key-related states are reset.
                     setKeyPair(null);
                     setNeedsPublicKeySetup(false);
                 }
@@ -292,14 +296,11 @@ export const Web3Provider = ({ children }) => {
             await tx.wait();
             toast.success("Security setup complete!", { id: toastId });
 
-            // --- [FIX APPLIED in previous step] ---
-            // Optimistically update the user profile in the frontend state.
             setUserProfile(prevProfile => ({
                 ...prevProfile,
                 publicKey: keyPair.publicKey,
             }));
 
-            // CRITICAL FIX: Immediately flip the state to resolve the race condition.
             setNeedsPublicKeySetup(false); 
         } catch (error) {
             console.error("Error saving public key:", error);
@@ -396,7 +397,6 @@ export const Web3Provider = ({ children }) => {
             const handleUserVerified = (admin, verifiedUser) => {
                 if (verifiedUser.toLowerCase() === account.toLowerCase()) {
                     addNotification("Congratulations! Your account has been verified.");
-                    // Trigger a full state refresh to transition from PendingVerification to PublicKeySetup
                     checkUserRegistrationAndState(account, contract, signer);
                 }
             };
@@ -404,10 +404,6 @@ export const Web3Provider = ({ children }) => {
             const handlePublicKeySaved = (userAddress) => {
                 if (userAddress.toLowerCase() === account.toLowerCase()) {
                     addNotification("Your encryption key was securely saved on-chain!");
-                    // --- [FINAL FIX APPLIED] ---
-                    // The race-condition-causing refresh call has been removed.
-                    // The optimistic update in `savePublicKeyOnChain` is now the single
-                    // source of truth for the UI transition, preventing the flicker.
                 }
             };
 
@@ -429,9 +425,8 @@ export const Web3Provider = ({ children }) => {
             signer, account, contract, owner, isRegistered, userProfile, userStatus,
             records, requests, isLoadingProfile, notifications, keyPair, needsPublicKeySetup,
             accessList,
-            connectWallet, disconnectWallet, 
+            connectWallet, disconnect: disconnectWallet, 
             checkUserRegistration: () => checkUserRegistrationAndState(account, contract, signer),
-            // --- [NEW] Expose the new function to the rest of the application ---
             refetchUserProfile,
             markNotificationsAsRead,
             generateAndSetKeyPair,
@@ -445,4 +440,3 @@ export const Web3Provider = ({ children }) => {
 export const useWeb3 = () => {
     return useContext(Web3Context);
 };
-

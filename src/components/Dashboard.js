@@ -17,7 +17,10 @@ import Profile from "./Profile";
 import PublicKeySetup from "./PublicKeySetup";
 import AdminDashboard from "./AdminDashboard";
 import SuperAdminDashboard from "./SuperAdminDashboard";
-import InsuranceDashboard from "./InsuranceDashboard"; 
+import InsuranceDashboard from "./InsuranceDashboard";
+// --- FIX ---
+// Import the new component that will be displayed to revoked users.
+import AccessRevoked from "./AccessRevoked";
 
 const DashboardIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>;
 const RecordsIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>;
@@ -40,8 +43,12 @@ export default function Dashboard() {
         else setGreeting('Good Evening');
     }, []);
 
-    if (!userProfile) {
-        return <div className="text-center p-10"><p>Loading user profile...</p></div>;
+    // --- FIX ---
+    // The loading check is moved higher up. Previously, if userProfile was null (which it is for a revoked user),
+    // this component would return a "Loading..." message indefinitely. Now, it correctly allows the logic
+    // to proceed to the `switch (userStatus)` block, which can then handle the 'revoked' case.
+    if (!userStatus) {
+        return <div className="text-center p-10"><p>Loading user status...</p></div>;
     }
 
     switch (userStatus) {
@@ -51,24 +58,28 @@ export default function Dashboard() {
         case 'pending_hospital':
             return <HospitalRequestPending />;
 
-        // --- MISTAKE ---
-        // The original `switch` statement had no case for the 'rejected' status. When a user's
-        // request was rejected, the code would fall through to the `default` case, which
-        // displayed a generic "Your account status is currently: rejected" message instead
-        // of the interactive rejection screen.
-        
-        // --- FIX ---
-        // A new `case` is added specifically for the 'rejected' status. It correctly routes
-        // the user to the `HospitalRequestPending` component. This works because we have already
-        // programmed that component to be "smart"—it internally checks the `userStatus` and
-        // knows to display the specific rejection UI (with the "Submit a New Request" button)
-        // when the status is 'rejected'. This completes the entire rejection workflow.
         case 'rejected':
             return <HospitalRequestPending />;
+
+        // --- MISTAKE ---
+        // The original `switch` statement did not have a case for the 'revoked' status. This meant a
+        // revoked user would fall through to the `default` case and see a generic status message,
+        // rather than being explicitly blocked.
+        // --- FIX ---
+        // A new `case` is added for the 'revoked' status. This case now correctly renders the
+        // `AccessRevoked` component, which displays a clear message and a disconnect button,
+        // effectively blocking the user from proceeding further into the application.
+        case 'revoked':
+            return <AccessRevoked />;
 
         case 'approved':
             if (needsPublicKeySetup) {
                 return <PublicKeySetup />;
+            }
+            // A check for userProfile is now necessary here, since we can reach this point with a null profile
+            // during the brief moment between status approval and full profile load.
+            if (!userProfile) {
+                return <div className="text-center p-10"><p>Loading user profile...</p></div>;
             }
             switch (userProfile.role) {
                 case 'HospitalAdmin':
@@ -196,3 +207,4 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
         </ul>
     );
 };
+
