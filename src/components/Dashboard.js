@@ -196,4 +196,3 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
         </ul>
     );
 };
-

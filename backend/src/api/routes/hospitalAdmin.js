@@ -220,6 +220,45 @@ router.post('/revoke-professional', async (req, res, next) => {
     }
 });
 
+/**
+ * @route   POST /api/hospital-admin/reject-professional
+ * @desc    Rejects a professional's affiliation request by updating their status.
+ * @access  Private (Hospital Admin only)
+ */
+router.post('/reject-professional', async (req, res, next) => {
+    const { professionalAddress, hospitalId } = req.body;
+
+    if (!professionalAddress || hospitalId === undefined || hospitalId === null) {
+        return res.status(400).json({ success: false, message: 'Professional address and hospital ID are required.' });
+    }
+
+    try {
+        logger.info(`Rejection process started for professional: ${professionalAddress} at hospital ${hospitalId}`);
+
+        const user = await User.findOneAndUpdate(
+            {
+                address: professionalAddress,
+                requestedHospitalId: hospitalId,
+                professionalStatus: 'pending'
+            },
+            {
+                $set: { professionalStatus: 'rejected' }
+            },
+            { new: true }
+        );
+
+        if (!user) {
+            logger.warn(`Attempted to reject a non-pending or non-existent request for ${professionalAddress}.`);
+            return res.status(404).json({ success: false, message: 'No pending request found for this professional at this hospital.' });
+        }
+
+        logger.info(`Successfully rejected professional ${professionalAddress} for hospital ${hospitalId}.`);
+        res.json({ success: true, message: 'Professional affiliation request has been rejected.' });
+
+    } catch (error) {
+        logger.error(`Failed to reject professional ${professionalAddress}:`, error);
+        next(error);
+    }
+});
 
 module.exports = router;
-

@@ -136,6 +136,31 @@ export default function AdminDashboard() {
         }
     };
 
+    const handleReject = async (request) => {
+        setProcessingId(request.address);
+        const toastId = toast.loading(`Rejecting request for ${request.name}...`);
+        try {
+            const response = await fetch('http://localhost:3001/api/hospital-admin/reject-professional', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    professionalAddress: request.address,
+                    hospitalId: userProfile.hospitalId,
+                }),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.message);
+
+            toast.success(`Request for ${request.name} has been rejected.`, { id: toastId });
+            await fetchData(); // Immediately refetch to update the list
+        } catch (error) {
+            console.error("Rejection failed:", error);
+            toast.error(error.message || "Rejection failed.", { id: toastId });
+        } finally {
+            setProcessingId(null);
+        }
+    };
+
     const handleCopyAddress = (address) => {
         const el = document.createElement('textarea');
         el.value = address;
@@ -167,14 +192,24 @@ export default function AdminDashboard() {
                         </div>
                         <div className="w-full sm:w-auto flex-shrink-0">
                             {isPendingList ? (
-                                <button
-                                    onClick={() => handleVerify(item)}
-                                    disabled={processingId === item.address || item.professionalStatus === 'verifying'}
-                                    className="w-full flex items-center justify-center gap-2 px-4 py-2 font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-slate-400 disabled:cursor-wait transition-all shadow-sm"
-                                >
-                                    <CheckCircleIcon />
-                                    {item.professionalStatus === 'verifying' ? 'Verifying...' : 'Verify'}
-                                </button>
+                                <div className="flex flex-col sm:flex-row gap-2 w-full">
+                                    <button
+                                        onClick={() => handleVerify(item)}
+                                        disabled={processingId === item.address || item.professionalStatus === 'verifying'}
+                                        className="w-full flex items-center justify-center gap-2 px-4 py-2 font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-slate-400 disabled:cursor-wait transition-all shadow-sm"
+                                    >
+                                        <CheckCircleIcon />
+                                        {item.professionalStatus === 'verifying' ? 'Verifying...' : 'Verify'}
+                                    </button>
+                                    <button
+                                        onClick={() => handleReject(item)}
+                                        disabled={processingId === item.address || item.professionalStatus === 'verifying'}
+                                        className="w-full flex items-center justify-center gap-2 px-4 py-2 font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:bg-slate-400 disabled:cursor-wait transition-all shadow-sm"
+                                    >
+                                        <XCircleIcon />
+                                        Reject
+                                    </button>
+                                </div>
                             ) : (
                                 <button
                                     onClick={() => handleRevoke(item)}

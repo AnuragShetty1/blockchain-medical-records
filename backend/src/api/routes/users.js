@@ -67,6 +67,16 @@ router.post('/request-association', async (req, res, next) => {
 
         const lowerCaseAddress = address.toLowerCase();
 
+        const existingUser = await User.findOne({ address: lowerCaseAddress });
+
+        if (existingUser) {
+            const isPendingOrActive = ['pending', 'verifying', 'approved', 'revoking'].includes(existingUser.professionalStatus);
+            if (isPendingOrActive) {
+                logger.warn(`Attempt to re-register by active/pending user: ${lowerCaseAddress}`);
+                return res.status(409).json({ success: false, message: 'You already have a pending or active registration.' });
+            }
+        }
+
         const updatedUser = await User.findOneAndUpdate(
             { address: lowerCaseAddress },
             {
@@ -138,10 +148,9 @@ router.post('/register-patient', async (req, res, next) => {
     }
 });
 
-// --- NEW ENDPOINT ---
 /**
  * @route   POST /api/users/reset-hospital-request
- * @desc    Deletes a user's rejected hospital registration request to allow them to re-register.
+ * @desc    Resets a rejected request for a hospital OR a professional to allow re-registration.
  * @access  Private (Authenticated User)
  */
 router.post('/reset-hospital-request', async (req, res, next) => {
@@ -153,22 +162,46 @@ router.post('/reset-hospital-request', async (req, res, next) => {
             return res.status(400).json({ success: false, message: 'User address is required.' });
         }
 
-        // Find and delete the request that was rejected.
+        // --- MISTAKE ---
+        // The original logic only checked for a rejected `RegistrationRequest` (for hospitals), but not
+        // for a rejected `User` (for professionals). This caused an error when a rejected professional
+        // tried to re-register because their rejection was stored in a different data model.
+
+        // --- FIX ---
+        // The logic is now updated to handle both scenarios.
+        // First, it attempts to find and reset a rejected professional by updating their `professionalStatus`
+        // in the User model. If that fails, it then attempts to find and delete a rejected hospital
+        // request from the RegistrationRequest model. This makes the endpoint robust for both workflows.
+
+        // Scenario 1: Check for and reset a rejected professional user.
+        const rejectedUser = await User.findOneAndUpdate(
+            { address: lowerCaseAddress, professionalStatus: 'rejected' },
+            { $set: { professionalStatus: 'unregistered', requestedHospitalId: null } },
+            { new: true }
+        );
+
+        if (rejectedUser) {
+            logger.info(`Reset rejected professional status for address: ${lowerCaseAddress}`);
+            return res.status(200).json({ success: true, message: 'Request status has been reset.' });
+        }
+
+        // Scenario 2: If no rejected user was found, check for a rejected hospital registration request.
         const result = await RegistrationRequest.deleteOne({
             requesterAddress: lowerCaseAddress,
             status: 'rejected'
         });
 
-        if (result.deletedCount === 0) {
-            logger.warn(`No rejected hospital request found for address: ${lowerCaseAddress}`);
-            return res.status(404).json({ success: false, message: 'No rejected request found to reset.' });
+        if (result.deletedCount > 0) {
+            logger.info(`Reset rejected hospital request for address: ${lowerCaseAddress}`);
+            return res.status(200).json({ success: true, message: 'Request status has been reset.' });
         }
-
-        logger.info(`Reset rejected hospital request for address: ${lowerCaseAddress}`);
-        res.status(200).json({ success: true, message: 'Request status has been reset.' });
+        
+        // If neither was found, the request is invalid.
+        logger.warn(`No rejected professional or hospital request found for address: ${lowerCaseAddress} to reset.`);
+        return res.status(404).json({ success: false, message: 'No rejected request found to reset.' });
 
     } catch (error) {
-        logger.error(`Error resetting hospital request for ${req.body.address}:`, error);
+        logger.error(`Error resetting request for ${req.body.address}:`, error);
         next(error);
     }
 });
