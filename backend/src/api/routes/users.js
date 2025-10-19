@@ -30,33 +30,18 @@ router.get('/status/:address', async (req, res, next) => {
                 publicKey: user.publicKey,
             });
         }
-
-        // --- MISTAKE ---
-        // The original logic checked for a generic 'pending' status, which is used for 
-        // professional affiliation requests stored in the User collection. It failed to
-        // find new hospital registration requests, which are stored in the RegistrationRequest
-        // collection with a more specific status.
-        // const pendingRequest = await RegistrationRequest.findOne({
-        //     requesterAddress: address,
-        //     status: { $in: ['pending', 'verifying'] }
-        // });
-        // if (pendingRequest) {
-        //     return res.json({ success: true, status: 'pending_verification' });
-        // }
         
-        // --- FIX ---
-        // This is the crucial correction. After failing to find a User record, the API
-        // now specifically checks the RegistrationRequest collection for a hospital request
-        // that is either 'pending_hospital' or 'verifying'. If found, it correctly returns
-        // the 'pending_hospital' status, which the frontend uses to display the correct pending page.
-        const pendingHospitalRequest = await RegistrationRequest.findOne({
-            requesterAddress: address,
-            status: { $in: ['pending_hospital', 'verifying'] }
-        });
+        const hospitalRequest = await RegistrationRequest.findOne({
+            requesterAddress: address
+        }).sort({ createdAt: -1 });
 
-        if (pendingHospitalRequest) {
-            // Return the specific status that the frontend is now expecting.
-            return res.json({ success: true, status: 'pending_hospital' });
+        if (hospitalRequest) {
+            if (hospitalRequest.status === 'pending_hospital' || hospitalRequest.status === 'verifying') {
+                return res.json({ success: true, status: 'pending_hospital' });
+            }
+            if (hospitalRequest.status === 'rejected') {
+                return res.json({ success: true, status: 'rejected' });
+            }
         }
 
         return res.json({ success: true, status: 'unregistered' });
@@ -152,6 +137,42 @@ router.post('/register-patient', async (req, res, next) => {
         next(error);
     }
 });
+
+// --- NEW ENDPOINT ---
+/**
+ * @route   POST /api/users/reset-hospital-request
+ * @desc    Deletes a user's rejected hospital registration request to allow them to re-register.
+ * @access  Private (Authenticated User)
+ */
+router.post('/reset-hospital-request', async (req, res, next) => {
+    try {
+        const { address } = req.body;
+        const lowerCaseAddress = address.toLowerCase();
+
+        if (!address) {
+            return res.status(400).json({ success: false, message: 'User address is required.' });
+        }
+
+        // Find and delete the request that was rejected.
+        const result = await RegistrationRequest.deleteOne({
+            requesterAddress: lowerCaseAddress,
+            status: 'rejected'
+        });
+
+        if (result.deletedCount === 0) {
+            logger.warn(`No rejected hospital request found for address: ${lowerCaseAddress}`);
+            return res.status(404).json({ success: false, message: 'No rejected request found to reset.' });
+        }
+
+        logger.info(`Reset rejected hospital request for address: ${lowerCaseAddress}`);
+        res.status(200).json({ success: true, message: 'Request status has been reset.' });
+
+    } catch (error) {
+        logger.error(`Error resetting hospital request for ${req.body.address}:`, error);
+        next(error);
+    }
+});
+
 
 /**
  * @route   GET /api/users/records/patient/:address
@@ -506,3 +527,4 @@ router.post('/records/details', async (req, res, next) => {
 
 
 module.exports = router;
+

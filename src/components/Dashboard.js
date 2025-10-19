@@ -45,16 +45,25 @@ export default function Dashboard() {
     }
 
     switch (userStatus) {
-        // --- FIX APPLIED ---
-        // 'pending' is for professionals (Doctors, etc.) awaiting affiliation approval.
-        // It should render the generic PendingVerification component.
         case 'pending':
             return <PendingVerification />;
         
-        // --- FIX APPLIED ---
-        // 'pending_hospital' is specifically for a potential Hospital Admin awaiting
-        // Super Admin approval. It should render the HospitalRequestPending component.
         case 'pending_hospital':
+            return <HospitalRequestPending />;
+
+        // --- MISTAKE ---
+        // The original `switch` statement had no case for the 'rejected' status. When a user's
+        // request was rejected, the code would fall through to the `default` case, which
+        // displayed a generic "Your account status is currently: rejected" message instead
+        // of the interactive rejection screen.
+        
+        // --- FIX ---
+        // A new `case` is added specifically for the 'rejected' status. It correctly routes
+        // the user to the `HospitalRequestPending` component. This works because we have already
+        // programmed that component to be "smart"—it internally checks the `userStatus` and
+        // knows to display the specific rejection UI (with the "Submit a New Request" button)
+        // when the status is 'rejected'. This completes the entire rejection workflow.
+        case 'rejected':
             return <HospitalRequestPending />;
 
         case 'approved':
@@ -84,9 +93,7 @@ export default function Dashboard() {
     }
 }
 
-// NOTE: The old patient UI code below is now unreachable because all patient-related statuses
-// are now correctly routed to the new <PatientDashboard /> component. 
-// This code can be safely removed in a future cleanup.
+// NOTE: The old patient UI code below is now unreachable and can be safely removed in a future cleanup.
 const NavItem = ({ icon, label, active, onClick, notificationCount = 0 }) => (
     <button
         onClick={onClick}
@@ -189,3 +196,4 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
         </ul>
     );
 };
+

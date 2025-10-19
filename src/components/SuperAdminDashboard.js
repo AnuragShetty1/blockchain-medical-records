@@ -14,6 +14,10 @@ export default function SuperAdminDashboard() {
     const [verifiedHospitals, setVerifiedHospitals] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
+    
+    // --- NEW ---
+    // State to track which request is currently being rejected to provide UI feedback.
+    const [rejectingId, setRejectingId] = useState(null);
 
     const API_URL = 'http://localhost:3001/api/super-admin';
 
@@ -49,8 +53,6 @@ export default function SuperAdminDashboard() {
                 adminAddress
             });
             if (response.data.success) {
-                // --- [THE FIX] ---
-                // Immediately fetch data to show the 'verifying' state.
                 await fetchRequestsAndHospitals();
             } else {
                throw new Error(response.data.message || 'Verification failed.');
@@ -61,6 +63,32 @@ export default function SuperAdminDashboard() {
         }
     };
 
+    // --- NEW ---
+    /**
+     * Handles the rejection of a hospital request.
+     * @param {number} requestId - The ID of the request to reject.
+     */
+    const handleReject = async (requestId) => {
+        setError('');
+        setRejectingId(requestId); // Set the current request as being rejected
+        try {
+            const response = await axios.post(`${API_URL}/reject-hospital`, {
+                requestId
+            });
+            if (response.data.success) {
+                // On success, refresh the list to remove the rejected item.
+                await fetchRequestsAndHospitals();
+            } else {
+                throw new Error(response.data.message || 'Rejection failed.');
+            }
+        } catch (err) {
+            console.error("Error rejecting hospital:", err);
+            setError(err.response?.data?.message || 'A critical error occurred during rejection.');
+        } finally {
+            setRejectingId(null); // Reset the rejecting state regardless of outcome.
+        }
+    };
+
     const handleRevoke = async (hospitalId) => {
         setError('');
         try {
@@ -68,8 +96,6 @@ export default function SuperAdminDashboard() {
                 hospitalId
             });
             if (response.data.success) {
-                // --- [THE FIX] ---
-                // Immediately fetch data to show the 'revoking' state.
                 await fetchRequestsAndHospitals();
             } else {
                 throw new Error(response.data.message || 'Revocation failed.');
@@ -101,18 +127,34 @@ export default function SuperAdminDashboard() {
                                     <h3 className="text-lg font-bold text-slate-800">{req.hospitalName}</h3>
                                     <p className="text-sm text-slate-500 mt-1">Request ID: {req.requestId}</p>
                                     <p className="text-sm text-slate-500 break-words">Admin: {req.requesterAddress}</p>
-                                    <button
-                                        onClick={() => handleVerify(req.requestId, req.requesterAddress)}
-                                        disabled={req.status === 'verifying'}
-                                        className="mt-4 w-full flex items-center justify-center bg-teal-500 text-white font-bold py-2 px-4 rounded-md hover:bg-teal-600 focus:outline-none transition-colors disabled:bg-blue-400 disabled:cursor-not-allowed"
-                                    >
-                                        {req.status === 'verifying' ? (
-                                            <>
-                                                <Spinner />
-                                                Verifying on Blockchain...
-                                            </>
-                                        ) : 'Verify Hospital'}
-                                    </button>
+                                    
+                                    {/* --- MISTAKE --- */}
+                                    {/* The original UI only had a single button, offering no option to reject. */}
+                                    {/* <button onClick={() => handleVerify(...)}>Verify Hospital</button> */}
+
+                                    {/* --- FIX --- */}
+                                    {/* A button group is added to provide both 'Verify' and 'Reject' actions. */}
+                                    {/* Both buttons are disabled while any action is in progress to prevent conflicts. */}
+                                    <div className="mt-4 grid grid-cols-2 gap-2">
+                                        <button
+                                            onClick={() => handleVerify(req.requestId, req.requesterAddress)}
+                                            disabled={req.status === 'verifying' || rejectingId !== null}
+                                            className="flex items-center justify-center bg-teal-500 text-white font-bold py-2 px-4 rounded-md hover:bg-teal-600 focus:outline-none transition-colors disabled:bg-slate-400 disabled:cursor-not-allowed"
+                                        >
+                                            {req.status === 'verifying' ? (
+                                                <><Spinner /> Verifying...</>
+                                            ) : 'Verify'}
+                                        </button>
+                                        <button
+                                            onClick={() => handleReject(req.requestId)}
+                                            disabled={req.status === 'verifying' || rejectingId !== null}
+                                            className="flex items-center justify-center bg-slate-500 text-white font-bold py-2 px-4 rounded-md hover:bg-slate-600 focus:outline-none transition-colors disabled:bg-slate-400 disabled:cursor-not-allowed"
+                                        >
+                                            {rejectingId === req.requestId ? (
+                                                <><Spinner /> Rejecting...</>
+                                            ) : 'Reject'}
+                                        </button>
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -137,10 +179,7 @@ export default function SuperAdminDashboard() {
                                         className="mt-4 w-full flex items-center justify-center bg-red-500 text-white font-bold py-2 px-4 rounded-md hover:bg-red-600 focus:outline-none transition-colors disabled:bg-red-300 disabled:cursor-not-allowed"
                                     >
                                         {hospital.status === 'revoking' ? (
-                                            <>
-                                                <Spinner />
-                                                Revoking on Blockchain...
-                                            </>
+                                            <><Spinner /> Revoking...</>
                                         ) : 'Revoke Hospital'}
                                     </button>
                                 </div>
@@ -154,4 +193,3 @@ export default function SuperAdminDashboard() {
         </div>
     );
 }
-

@@ -12,16 +12,6 @@ const logger = require('../../utils/logger');
  */
 router.get('/requests', async (req, res, next) => {
     try {
-        // --- MISTAKE ---
-        // The query was looking for the generic 'pending' status. This failed to find new 
-        // hospital registration requests after the indexer was updated to use the more 
-        // specific 'pending_hospital' status.
-        // const pendingRequests = await RegistrationRequest.find({ status: { $in: ['pending', 'verifying'] } });
-        
-        // --- FIX ---
-        // The query now specifically looks for the 'pending_hospital' and 'verifying' statuses.
-        // This ensures the Super Admin's dashboard correctly fetches and displays new hospital 
-        // registrations that are waiting for approval or are in the process of being verified.
         const pendingRequests = await RegistrationRequest.find({ 
             status: { $in: ['pending_hospital', 'verifying'] } 
         }).sort({ createdAt: -1 });
@@ -66,15 +56,6 @@ router.post('/verify-hospital', async (req, res, next) => {
     try {
         logger.info(`Verification process started for request ID: ${numericRequestId}`);
 
-        // --- MISTAKE ---
-        // This query was looking for the generic 'pending' status and would fail to find the
-        // correct request to update.
-        // const request = await RegistrationRequest.findOneAndUpdate(
-        //     { requestId: numericRequestId, status: 'pending' }, ...
-
-        // --- FIX ---
-        // The query now correctly finds the request by its 'pending_hospital' status before
-        // updating it to 'verifying'. This allows the verification process to proceed.
         const request = await RegistrationRequest.findOneAndUpdate(
             { requestId: numericRequestId, status: 'pending_hospital' },
             { $set: { status: 'verifying' } },
@@ -154,6 +135,46 @@ router.post('/revoke-hospital', async (req, res, next) => {
         res.status(500).json({ success: false, message: reason });
     }
 });
+
+// --- NEW ENDPOINT ---
+/**
+ * @route   POST /api/super-admin/reject-hospital
+ * @desc    Rejects a pending hospital registration request.
+ * @access  Public (for now)
+ */
+router.post('/reject-hospital', async (req, res, next) => {
+    const { requestId } = req.body;
+    const numericRequestId = Number(requestId);
+
+    if (requestId === undefined) {
+        return res.status(400).json({ success: false, message: 'A valid Request ID is required.' });
+    }
+
+    try {
+        logger.info(`Rejection process started for request ID: ${numericRequestId}`);
+
+        // Find the request that is specifically in the 'pending_hospital' state.
+        const request = await RegistrationRequest.findOneAndUpdate(
+            { requestId: numericRequestId, status: 'pending_hospital' },
+            { $set: { status: 'rejected' } },
+            { new: true }
+        );
+
+        // If no request is found, it means it was not in the correct state (e.g., already verified or rejected).
+        if (!request) {
+            logger.warn(`Request ID ${numericRequestId} not found or not in a pending state.`);
+            return res.status(404).json({ success: false, message: 'Request not found or it is not in a pending state.' });
+        }
+
+        logger.info(`Successfully rejected request ID: ${numericRequestId}`);
+        res.json({ success: true, message: 'Hospital request has been rejected.' });
+
+    } catch (error) {
+        logger.error(`Failed to reject request ID ${numericRequestId}:`, error);
+        next(error);
+    }
+});
+
 
 module.exports = router;
 
