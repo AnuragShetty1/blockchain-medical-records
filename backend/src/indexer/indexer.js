@@ -11,8 +11,26 @@ const Record = require('../models/Record');
 const AccessRequest = require('../models/AccessRequest');
 const AccessGrant = require('../models/AccessGrant');
 
-const startIndexer = (wss) => {
+// --- NEW: Global error handlers for server stability ---
 
+// Catch any unhandled promise rejections to prevent the server from crashing.
+process.on('unhandledRejection', (reason, promise) => {
+    logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+    // It's recommended to restart the process in such cases.
+    process.exit(1);
+});
+
+// Ensure the indexer logs a clean shutdown message.
+const gracefulShutdown = () => {
+    logger.info('Shutting down indexer gracefully.');
+    process.exit(0);
+};
+
+process.on('SIGINT', gracefulShutdown); // Handle Ctrl+C
+process.on('SIGTERM', gracefulShutdown); // Handle kill commands
+
+
+const startIndexer = async () => {
     logger.info('Initializing blockchain indexer...');
     
     const provider = new ethers.JsonRpcProvider(config.providerUrl);
@@ -20,270 +38,205 @@ const startIndexer = (wss) => {
 
     logger.info(`Indexer connected to contract at address: ${config.contractAddress}`);
 
-    contract.on('RegistrationRequested', async (requestId, hospitalName, requesterAddress, event) => {
-        try {
-            logger.info(`[Event] RegistrationRequested: ID ${requestId} for ${hospitalName}`);
-            await RegistrationRequest.findOneAndUpdate(
-                { requestId: Number(requestId) },
-                {
-                    requestId: Number(requestId),
-                    hospitalName,
-                    requesterAddress,
-                    status: 'pending',
-                },
-                { upsert: true, new: true }
-            );
-        } catch (error) {
-            logger.error(`Error processing RegistrationRequested event: ${error.message}`);
-        }
-    });
+    let lastProcessedBlock = (await provider.getBlockNumber()) - 1;
+    logger.info(`Starting to process events from block: ${lastProcessedBlock + 1}`);
 
-    contract.on('HospitalVerified', async (hospitalId, adminAddress, event) => {
-        const numericHospitalId = Number(hospitalId);
-        try {
-            logger.info(`[Event] HospitalVerified: ID ${numericHospitalId} for admin ${adminAddress}. Finalizing in database...`);
-            
-            const updatedRequest = await RegistrationRequest.findOneAndUpdate(
-                { requestId: numericHospitalId, status: 'verifying' },
-                { $set: { status: 'approved' } },
-                { new: true }
-            );
+    const pollInterval = 4000; // Poll every 4 seconds
 
-            if (!updatedRequest) {
-                logger.warn(`[Indexer] Did not find a VERIFYING request for ID ${numericHospitalId}. The event might be a duplicate or the API pre-processing failed.`);
-                return; 
+    const pollEvents = async () => {
+        try {
+            const latestBlock = await provider.getBlockNumber();
+            if (latestBlock <= lastProcessedBlock) {
+                return; // No new blocks to process
             }
-
-            const hospitalName = updatedRequest.hospitalName;
-            logger.info(`[Indexer] SUCCESS: Finalized request ID ${numericHospitalId} as 'approved'.`);
-
-            await Hospital.findOneAndUpdate(
-                { hospitalId: numericHospitalId }, 
-                { 
-                    hospitalId: numericHospitalId, 
-                    name: hospitalName,
-                    adminAddress, 
-                    isVerified: true,
-                    status: 'active'
-                }, 
-                { upsert: true, new: true }
-            );
-            logger.info(`[Indexer] Saved/Updated hospital: ${hospitalName}`);
             
-            await User.findOneAndUpdate(
-                { address: adminAddress.toLowerCase() }, 
-                { 
-                    $set: {
-                        address: adminAddress.toLowerCase(), 
-                        name: `Admin for ${hospitalName}`,
-                        role: 'HospitalAdmin',
-                        professionalStatus: 'approved',
-                        isVerified: true,
-                        hospitalId: numericHospitalId,
+            // --- Event Processing Logic ---
+            
+            // RegistrationRequested
+            try {
+                const events = await contract.queryFilter('RegistrationRequested', lastProcessedBlock + 1, latestBlock);
+                for (const event of events) {
+                    const [requestId, hospitalName, requesterAddress] = event.args;
+                    logger.info(`[Event] RegistrationRequested: ID ${requestId} for ${hospitalName}`);
+                    await RegistrationRequest.findOneAndUpdate(
+                        { requestId: Number(requestId) },
+                        { requestId: Number(requestId), hospitalName, requesterAddress, status: 'pending' },
+                        { upsert: true, new: true }
+                    );
+                }
+            } catch (e) { logger.error('Error polling RegistrationRequested:', e.message); }
+
+            // HospitalVerified
+            try {
+                const events = await contract.queryFilter('HospitalVerified', lastProcessedBlock + 1, latestBlock);
+                 for (const event of events) {
+                    const [hospitalId, adminAddress] = event.args;
+                    const numericHospitalId = Number(hospitalId);
+                    logger.info(`[Event] HospitalVerified: ID ${numericHospitalId} for admin ${adminAddress}.`);
+                    const updatedRequest = await RegistrationRequest.findOneAndUpdate(
+                        { requestId: numericHospitalId, status: 'verifying' },
+                        { $set: { status: 'approved' } },
+                        { new: true }
+                    );
+                    if (!updatedRequest) {
+                        logger.warn(`[Indexer] Did not find a VERIFYING request for ID ${numericHospitalId}.`);
+                        continue;
                     }
-                }, 
-                { upsert: true, new: true }
-            );
-            logger.info(`[Indexer] Saved/Updated hospital admin: ${adminAddress} and linked to hospital ID ${numericHospitalId}`);
+                    const hospitalName = updatedRequest.hospitalName;
+                    await Hospital.findOneAndUpdate(
+                        { hospitalId: numericHospitalId }, 
+                        { hospitalId: numericHospitalId, name: hospitalName, adminAddress, isVerified: true, status: 'active' }, 
+                        { upsert: true, new: true }
+                    );
+                    await User.findOneAndUpdate(
+                        { address: adminAddress.toLowerCase() }, 
+                        { $set: { address: adminAddress.toLowerCase(), name: `Admin for ${hospitalName}`, role: 'HospitalAdmin', professionalStatus: 'approved', isVerified: true, hospitalId: numericHospitalId } }, 
+                        { upsert: true, new: true }
+                    );
+                 }
+            } catch (e) { logger.error('Error polling HospitalVerified:', e.message); }
 
-        } catch (error)
-        {
-            logger.error(`Error processing HospitalVerified event for ID ${numericHospitalId}: ${error.message}`);
-        }
-    });
-    
-    contract.on('HospitalRevoked', async (hospitalId, event) => {
-        const numericHospitalId = Number(hospitalId);
-        try {
-            logger.info(`[Event] HospitalRevoked: ID ${numericHospitalId}. Finalizing in database...`);
+            // HospitalRevoked
+            try {
+                const events = await contract.queryFilter('HospitalRevoked', lastProcessedBlock + 1, latestBlock);
+                for (const event of events) {
+                    const [hospitalId] = event.args;
+                    const numericHospitalId = Number(hospitalId);
+                    logger.info(`[Event] HospitalRevoked: ID ${numericHospitalId}.`);
+                    await Hospital.findOneAndUpdate(
+                        { hospitalId: numericHospitalId, status: 'revoking' },
+                        { $set: { status: 'revoked', isVerified: false } },
+                        { new: true }
+                    );
+                }
+            } catch (e) { logger.error('Error polling HospitalRevoked:', e.message); }
 
-            const revokedHospital = await Hospital.findOneAndUpdate(
-                { hospitalId: numericHospitalId, status: 'revoking' },
-                { $set: { status: 'revoked', isVerified: false } },
-                { new: true }
-            );
+            // RoleAssigned
+            try {
+                const events = await contract.queryFilter('RoleAssigned', lastProcessedBlock + 1, latestBlock);
+                for (const event of events) {
+                    const [userAddress, role, hospitalId] = event.args;
+                    const roleEnumToString = { 1: "Doctor", 7: "LabTechnician" };
+                    const roleName = roleEnumToString[Number(role)] || 'Unassigned Professional';
+                    logger.info(`[Event] RoleAssigned: ${roleName} to ${userAddress} for Hospital ID ${hospitalId}`);
+                    await User.findOneAndUpdate(
+                        { address: userAddress.toLowerCase() },
+                        { $set: { role: roleName, hospitalId: Number(hospitalId), professionalStatus: 'approved', isVerified: true } },
+                        { new: true }
+                    );
+                }
+            } catch (e) { logger.error('Error polling RoleAssigned:', e.message); }
 
-            if (!revokedHospital) {
-                logger.warn(`[Indexer] Did not find a REVOKING hospital for ID ${numericHospitalId}. This could be a duplicate event or an API pre-processing failure.`);
-                return;
-            }
-            
-            logger.info(`[Indexer] SUCCESS: Finalized hospital ID ${numericHospitalId} as 'revoked'.`);
+            // RoleRevoked
+            try {
+                const events = await contract.queryFilter('RoleRevoked', lastProcessedBlock + 1, latestBlock);
+                for (const event of events) {
+                    const [userAddress] = event.args;
+                    logger.info(`[Event] RoleRevoked from ${userAddress}`);
+                    await User.findOneAndUpdate(
+                        { address: userAddress.toLowerCase() },
+                        { $set: { role: 'Patient', professionalStatus: 'revoked', isVerified: false }, $unset: { hospitalId: "", requestedHospitalId: "" } }, 
+                        { new: true }
+                    );
+                }
+            } catch (e) { logger.error('Error polling RoleRevoked:', e.message); }
 
-        } catch (error) {
-            logger.error(`Error processing HospitalRevoked event for ID ${numericHospitalId}: ${error.message}`);
-        }
-    });
-
-    contract.on('RoleAssigned', async (userAddress, role, hospitalId, event) => {
-        try {
-            const roleEnumToString = { 1: "Doctor", 7: "LabTechnician" };
-            const roleName = roleEnumToString[Number(role)] || 'Unassigned Professional';
-            logger.info(`[Event] RoleAssigned: ${roleName} to ${userAddress} for Hospital ID ${hospitalId}`);
-            
-            await User.findOneAndUpdate(
-                { address: userAddress.toLowerCase() },
-                { 
-                    $set: { 
-                        role: roleName, 
-                        hospitalId: Number(hospitalId),
-                        professionalStatus: 'approved',
-                        isVerified: true, 
-                    } 
-                },
-                { new: true }
-            );
-            logger.info(`[Indexer] User ${userAddress} status updated to 'approved'.`);
-        } catch (error) {
-            logger.error(`Error processing RoleAssigned event: ${error.message}`);
-        }
-    });
-
-    contract.on('RoleRevoked', async (userAddress, role, hospitalId, event) => {
-        try {
-            logger.info(`[Event] RoleRevoked from ${userAddress}`);
-            await User.findOneAndUpdate(
-                { address: userAddress.toLowerCase() },
-                { 
-                    $set: { 
-                        role: 'Patient', 
-                        professionalStatus: 'revoked',
-                        isVerified: false,
-                    },
-                    $unset: { 
-                        hospitalId: "",
-                        requestedHospitalId: ""
+            // PublicKeySaved
+            try {
+                const events = await contract.queryFilter('PublicKeySaved', lastProcessedBlock + 1, latestBlock);
+                for (const event of events) {
+                    const [userAddress] = event.args;
+                    logger.info(`[Event] PublicKeySaved: for user ${userAddress}`);
+                    const userOnChain = await contract.users(userAddress);
+                    if (userOnChain.publicKey && userOnChain.publicKey.length > 0) {
+                        await User.findOneAndUpdate(
+                            { address: userAddress.toLowerCase() },
+                            { $set: { publicKey: userOnChain.publicKey } },
+                            { new: true }
+                        );
                     }
-                }, 
-                { new: true }
-            );
-                logger.info(`[Indexer] User ${userAddress} status updated to 'revoked'.`);
-        } catch (error) {
-            logger.error(`Error processing RoleRevoked event: ${error.message}`);
-        }
-    });
-
-    contract.on('PublicKeySaved', async (userAddress, event) => {
-        try {
-            logger.info(`[Event] PublicKeySaved: for user ${userAddress}`);
+                }
+            } catch (e) { logger.error('Error polling PublicKeySaved:', e.message); }
             
-            const userOnChain = await contract.users(userAddress);
-            const publicKey = userOnChain.publicKey;
+            // RecordAdded
+            try {
+                const events = await contract.queryFilter('RecordAdded', lastProcessedBlock + 1, latestBlock);
+                for (const event of events) {
+                    const [recordId, owner, title, ipfsHash, category, isVerified, verifiedBy, timestamp] = event.args;
+                    const numericRecordId = Number(recordId);
+                    logger.info(`[Event] RecordAdded: ID ${numericRecordId} for owner ${owner}`);
+                    await Record.findOneAndUpdate(
+                        { recordId: numericRecordId },
+                        { recordId: numericRecordId, owner: owner.toLowerCase(), title, ipfsHash, category, isVerified, uploadedBy: verifiedBy.toLowerCase(), timestamp: new Date(Number(timestamp) * 1000) },
+                        { upsert: true, new: true }
+                    );
+                }
+            } catch (e) { logger.error('Error polling RecordAdded:', e.message); }
 
-            if (publicKey && publicKey.length > 0) {
-                await User.findOneAndUpdate(
-                    { address: userAddress.toLowerCase() },
-                    { 
-                        $set: { 
-                            publicKey: publicKey,
-                        } 
-                    },
-                    { new: true }
-                );
-                logger.info(`[Indexer] User ${userAddress} public key updated in database.`);
-            } else {
-                    logger.warn(`[Indexer] PublicKeySaved event for ${userAddress} but key is empty on-chain.`);
-            }
-        } catch (error) {
-            logger.error(`Error processing PublicKeySaved event: ${error.message}`);
-        }
-    });
-    
-    contract.on('RecordAdded', async (recordId, owner, title, ipfsHash, category, isVerified, verifiedBy, timestamp, event) => {
-        try {
-            const numericRecordId = Number(recordId);
-            logger.info(`[Event] RecordAdded: ID ${numericRecordId} for owner ${owner}`);
-
-            await Record.findOneAndUpdate(
-                { recordId: numericRecordId },
-                {
-                    recordId: numericRecordId,
-                    owner: owner.toLowerCase(),
-                    title: title,
-                    ipfsHash: ipfsHash,
-                    category: category,
-                    isVerified: isVerified,
-                    uploadedBy: verifiedBy.toLowerCase(),
-                    timestamp: new Date(Number(timestamp) * 1000),
-                },
-                { upsert: true, new: true }
-            );
-            logger.info(`[Indexer] Saved record metadata for ID ${numericRecordId}.`);
-        } catch(error) {
-            logger.error(`Error processing RecordAdded event: ${error.message}`);
-        }
-    });
-
-    contract.on('ProfessionalAccessRequested', async (requestId, recordIds, professional, patient, event) => {
-        try {
-            const numericRequestId = Number(requestId);
-            const numericRecordIds = recordIds.map(id => Number(id));
-            logger.info(`[Event] ProfessionalAccessRequested: ID ${numericRequestId} from ${professional} to ${patient}`);
-
-            await AccessRequest.findOneAndUpdate(
-                { requestId: numericRequestId },
-                {
-                    requestId: numericRequestId,
-                    recordIds: numericRecordIds,
-                    professionalAddress: professional.toLowerCase(),
-                    patientAddress: patient.toLowerCase(),
-                    status: 'pending',
-                },
-                { upsert: true, new: true }
-            );
-            logger.info(`[Indexer] Saved new access request ID ${numericRequestId}.`);
-        } catch (error) {
-            logger.error(`Error processing ProfessionalAccessRequested event: ${error.message}`);
-        }
-    });
-    
-    contract.on('AccessGranted', async (recordId, owner, grantee, expiration, encryptedDek, event) => {
-        try {
-            const numericRecordId = Number(recordId);
-            logger.info(`[Event] AccessGranted: Record ID ${numericRecordId} from owner ${owner} to grantee ${grantee}`);
-
-            await AccessGrant.findOneAndUpdate(
-                {
-                    recordId: numericRecordId,
-                    professionalAddress: grantee.toLowerCase()
-                },
-                {
-                    recordId: numericRecordId,
-                    patientAddress: owner.toLowerCase(),
-                    professionalAddress: grantee.toLowerCase(),
-                    expirationTimestamp: new Date(Number(expiration) * 1000),
-                    rewrappedKey: encryptedDek,
-                    createdAt: new Date(event.log.blockTimestamp * 1000) // Capture grant time
-                },
-                { upsert: true, new: true }
-            );
+            // ProfessionalAccessRequested
+            try {
+                const events = await contract.queryFilter('ProfessionalAccessRequested', lastProcessedBlock + 1, latestBlock);
+                for (const event of events) {
+                    const [requestId, recordIds, professional, patient] = event.args;
+                    const numericRequestId = Number(requestId);
+                    logger.info(`[Event] ProfessionalAccessRequested: ID ${numericRequestId} from ${professional} to ${patient}`);
+                    await AccessRequest.findOneAndUpdate(
+                        { requestId: numericRequestId },
+                        { requestId: numericRequestId, recordIds: recordIds.map(id => Number(id)), professionalAddress: professional.toLowerCase(), patientAddress: patient.toLowerCase(), status: 'pending' },
+                        { upsert: true, new: true }
+                    );
+                }
+            } catch (e) { logger.error('Error polling ProfessionalAccessRequested:', e.message); }
             
-            logger.info(`[Indexer] Saved access grant for record ID ${numericRecordId} to professional ${grantee}.`);
+            // AccessGranted
+            try {
+                const events = await contract.queryFilter('AccessGranted', lastProcessedBlock + 1, latestBlock);
+                for (const event of events) {
+                    // FIX: Correctly and efficiently fetch the block timestamp
+                    const block = await event.getBlock();
+                    if (!block) {
+                        logger.warn(`Could not fetch block for event at hash: ${event.transactionHash}`);
+                        continue;
+                    }
+                    const eventTimestamp = new Date(block.timestamp * 1000);
+
+                    const [recordId, owner, grantee, expiration, encryptedDek] = event.args;
+                    const numericRecordId = Number(recordId);
+                    logger.info(`[Event] AccessGranted: Record ID ${numericRecordId} to grantee ${grantee}`);
+                    await AccessGrant.findOneAndUpdate(
+                        { recordId: numericRecordId, professionalAddress: grantee.toLowerCase() },
+                        { recordId: numericRecordId, patientAddress: owner.toLowerCase(), professionalAddress: grantee.toLowerCase(), expirationTimestamp: new Date(Number(expiration) * 1000), rewrappedKey: encryptedDek, createdAt: eventTimestamp },
+                        { upsert: true, new: true }
+                    );
+                }
+            } catch (e) { logger.error('Error polling AccessGranted:', e.message); }
+
+            // AccessRevoked
+            try {
+                const events = await contract.queryFilter('AccessRevoked', lastProcessedBlock + 1, latestBlock);
+                for (const event of events) {
+                    const [patient, professional, recordIds] = event.args;
+                    const numericRecordIds = recordIds.map(id => Number(id));
+                    logger.info(`[Event] AccessRevoked: Professional ${professional} from records [${numericRecordIds.join(', ')}]`);
+                    await AccessGrant.deleteMany({
+                        professionalAddress: professional.toLowerCase(),
+                        recordId: { $in: numericRecordIds }
+                    });
+                }
+            } catch (e) { logger.error('Error polling AccessRevoked:', e.message); }
+
+            // Update the last processed block
+            lastProcessedBlock = latestBlock;
 
         } catch (error) {
-            logger.error(`Error processing AccessGranted event: ${error.message}`);
+            logger.error(`Major error in event polling loop: ${error.message}`, error);
         }
-    });
+    };
 
-    // --- [NEW] EVENT LISTENER FOR ACCESS REVOCATION ---
-    contract.on('AccessRevoked', async (patient, professional, recordIds, event) => {
-        try {
-            const numericRecordIds = recordIds.map(id => Number(id));
-            logger.info(`[Event] AccessRevoked: Patient ${patient} revoked access for professional ${professional} to record IDs: [${numericRecordIds.join(', ')}]`);
+    setInterval(pollEvents, pollInterval);
 
-            const result = await AccessGrant.deleteMany({
-                professionalAddress: professional.toLowerCase(),
-                recordId: { $in: numericRecordIds }
-            });
-
-            logger.info(`[Indexer] Successfully deleted ${result.deletedCount} access grant(s) from the database.`);
-
-        } catch (error) {
-            logger.error(`Error processing AccessRevoked event: ${error.message}`);
-        }
-    });
-
-    logger.info('Indexer is now listening for blockchain events.');
+    logger.info('Indexer is now polling for blockchain events.');
 };
 
 module.exports = startIndexer;
+
