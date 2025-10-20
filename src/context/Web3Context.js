@@ -60,6 +60,8 @@ export const Web3Provider = ({ children }) => {
     const [requests, setRequests] = useState([]);
     const [accessList, setAccessList] = useState([]);
     const [notifications, setNotifications] = useState([]);
+    // --- [NEW] State to trigger UI refresh when new requests arrive ---
+    const [requestUpdateCount, setRequestUpdateCount] = useState(0);
 
     // --- SESSION MANAGEMENT ---
     const clearUserSession = () => {
@@ -173,21 +175,11 @@ export const Web3Provider = ({ children }) => {
             
             setUserStatus(data.status);
 
-            // --- MISTAKE ---
-            // The original logic did not correctly handle the 'revoked' status. A user with this status
-            // might still have `isRegistered` set to `true` from a previous session, allowing them to
-            // see their dashboard instead of being blocked.
-            // --- FIX ---
-            // A specific check for 'revoked' is added. If a user's status is revoked, we now
-            // explicitly set `isRegistered` to `false`. This is the key change that ensures the
-            // main routing components (`Dashboard.js` and `page.js`) will correctly identify the
-            // user as unauthorized and redirect them to the `AccessRevoked` component.
             if (data.status === 'revoked') {
                 setIsRegistered(false);
                 setUserProfile(null); // Clear profile for a revoked user
             } else if (data.status !== 'unregistered') {
                 setIsRegistered(true);
-                // Construct a profile object that matches the old structure for compatibility
                 const fullProfile = {
                     walletAddress: userAddress.toLowerCase(),
                     role: data.role,
@@ -198,7 +190,6 @@ export const Web3Provider = ({ children }) => {
                 };
                 setUserProfile(fullProfile);
 
-                // --- [KEY SETUP LOGIC] ---
                 const rolesThatNeedKeys = ['Patient', 'Doctor', 'LabTechnician'];
                 const userIsApproved = data.status === 'approved';
                 const userNeedsKey = rolesThatNeedKeys.includes(fullProfile.role);
@@ -221,7 +212,6 @@ export const Web3Provider = ({ children }) => {
                     setKeyPair(null);
                     setNeedsPublicKeySetup(false);
                 }
-                // --- [END KEY SETUP LOGIC] ---
 
             } else {
                 setIsRegistered(false);
@@ -238,7 +228,6 @@ export const Web3Provider = ({ children }) => {
         }
     }, [fetchPatientData]);
 
-    // --- [NEW] Function to allow components to manually trigger a profile refresh ---
     const refetchUserProfile = useCallback(async () => {
         if (account && contract && signer) {
             console.log("refetchUserProfile triggered");
@@ -247,7 +236,6 @@ export const Web3Provider = ({ children }) => {
             console.warn("refetchUserProfile called, but context is not ready.");
         }
     }, [account, contract, signer, checkUserRegistrationAndState]);
-
 
     const setupUserSession = useCallback(async (signerInstance, userAddress) => {
         try {
@@ -407,14 +395,28 @@ export const Web3Provider = ({ children }) => {
                 }
             };
 
+            // --- [NEW] Handle incoming access requests from professionals ---
+            const handleProfessionalAccessRequested = (requestId, recordIds, professional, patient) => {
+                if (patient.toLowerCase() === account.toLowerCase()) {
+                    addNotification(`You have a new access request from a professional.`);
+                    toast.success("New access request received!");
+                    // Trigger a state update that other components can listen to for refreshing their data.
+                    setRequestUpdateCount(prev => prev + 1);
+                }
+            };
+
             contract.on('RecordAdded', handleRecordAdded);
             contract.on('UserVerified', handleUserVerified);
             contract.on('PublicKeySaved', handlePublicKeySaved); 
+            // --- [NEW] Listen for the ProfessionalAccessRequested event ---
+            contract.on('ProfessionalAccessRequested', handleProfessionalAccessRequested);
 
             return () => {
                 contract.off('RecordAdded', handleRecordAdded);
                 contract.off('UserVerified', handleUserVerified);
                 contract.off('PublicKeySaved', handlePublicKeySaved); 
+                // --- [NEW] Clean up the listener ---
+                contract.off('ProfessionalAccessRequested', handleProfessionalAccessRequested);
             };
         }
     }, [contract, account, signer, fetchPatientData, checkUserRegistrationAndState]);
@@ -426,6 +428,7 @@ export const Web3Provider = ({ children }) => {
             signer, account, contract, owner, isRegistered, userProfile, userStatus,
             records, requests, isLoadingProfile, notifications, keyPair, needsPublicKeySetup,
             accessList,
+            requestUpdateCount, // --- [NEW] Expose the update trigger state ---
             connectWallet, disconnect: disconnectWallet, 
             checkUserRegistration: () => checkUserRegistrationAndState(account, contract, signer),
             refetchUserProfile,
@@ -441,3 +444,4 @@ export const Web3Provider = ({ children }) => {
 export const useWeb3 = () => {
     return useContext(Web3Context);
 };
+
