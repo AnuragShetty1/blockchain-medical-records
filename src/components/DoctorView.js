@@ -7,19 +7,61 @@ import VerifiedUploadForm from './VerifiedUploadForm';
 import DoctorRecordList from './DoctorRecordList';
 import axios from 'axios';
 import { useDebounce } from 'use-debounce';
+import { Stethoscope, UploadCloud, FileSearch, HeartHandshake, Search, User, X as CloseIcon, ChevronDown, Info, Loader2 } from 'lucide-react';
 
-// --- ICONS ---
-const SearchIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>;
-const UserIcon = (props) => <svg className={props.className || "w-6 h-6"} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" /></svg>;
-const UploadIcon = () => <svg className="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" /></svg>;
-const RecordsIcon = () => <svg className="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>;
-const RequestIcon = () => <svg className="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25l-1.28.512c-2.097.839-4.445-1.043-3.614-3.141l.342-1.025a.75.75 0 01.636-.492h6.212a2.25 2.25 0 002.25-2.25v-1.125a2.25 2.25 0 00-2.25-2.25H9.75A.75.75 0 019 7.125v1.5" /></svg>
-const InfoIcon = () => <svg className="w-12 h-12 text-slate-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>;
-const Spinner = () => <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-slate-500"></div>;
-const ButtonSpinner = () => <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>;
-const CloseIcon = () => <svg className="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>;
-const ChevronDownIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>;
+// --- STATIC "MODERN CLINICAL" BACKGROUND ---
+const StaticClinicalBackground = () => {
+    const svgGridPattern = encodeURIComponent(`
+        <svg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'>
+            <path d='M0 1 L40 1 M1 0 L1 40' stroke='#E0E7FF' stroke-width='0.5'/>
+        </svg>
+    `);
+    return (
+        <>
+            <style jsx global>{`
+                .clinical-background {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    z-index: -1;
+                    background-color: #F9FAFB;
+                    background-image: 
+                        linear-gradient(to bottom, rgba(240, 245, 255, 0.8), rgba(255, 255, 255, 1)),
+                        url("data:image/svg+xml,${svgGridPattern}");
+                }
+            `}</style>
+            <div className="clinical-background" aria-hidden="true"></div>
+        </>
+    );
+};
 
+// --- REDESIGNED WELCOME HEADER ---
+const DoctorHeader = ({ doctorProfile }) => (
+    <div className="mb-8">
+        {!doctorProfile ? (
+            <div className="animate-pulse">
+                <div className="h-10 w-3/4 bg-slate-200 rounded-md"></div>
+                <div className="h-5 w-1/2 bg-slate-200 rounded-md mt-3"></div>
+            </div>
+        ) : (
+            <div className="flex items-center gap-4">
+                <div className="bg-sky-100 text-sky-600 p-3 rounded-lg">
+                    <Stethoscope className="h-8 w-8" />
+                </div>
+                <div>
+                    <h1 className="text-4xl font-bold text-slate-900">
+                        Dr. {doctorProfile.name}
+                    </h1>
+                    <p className="mt-1 text-lg text-slate-500">
+                        Welcome to your clinical workspace.
+                    </p>
+                </div>
+            </div>
+        )}
+    </div>
+);
 
 const DOCTOR_CATEGORIES = [
     { value: 'doctor-note', label: 'Doctor\'s Note' },
@@ -33,28 +75,25 @@ export default function DoctorDashboard() {
     const [activeTab, setActiveTab] = useState('upload');
 
     return (
-        <div className="w-full min-h-[calc(100vh-128px)] bg-slate-100">
-            <header className="bg-white shadow-sm">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-                    <h1 className="text-3xl font-bold tracking-tight text-slate-900">Doctor's Dashboard</h1>
-                    {userProfile?.name && <p className="mt-1 text-slate-600">Welcome back, Dr. {userProfile.name.split(' ').pop()}!</p>}
-                </div>
-            </header>
-            
-            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                <div className="mb-8">
-                    <nav className="border-b border-slate-200" aria-label="Tabs">
-                         <div className="-mb-px flex space-x-8">
-                             <TabButton id="upload" label="Upload for Patient" icon={<UploadIcon />} activeTab={activeTab} setActiveTab={setActiveTab} />
-                             <TabButton id="request" label="Request Access" icon={<RequestIcon />} activeTab={activeTab} setActiveTab={setActiveTab} />
-                             <TabButton id="review" label="Review Shared Records" icon={<RecordsIcon />} activeTab={activeTab} setActiveTab={setActiveTab} />
-                         </div>
+        <div className="relative w-full min-h-[calc(100vh-128px)]">
+            <StaticClinicalBackground />
+            <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                <DoctorHeader doctorProfile={userProfile} />
+                
+                <div className="bg-white/80 backdrop-blur-md rounded-xl shadow-lg border border-slate-200/80 overflow-hidden ring-1 ring-black ring-opacity-5">
+                    <nav className="border-b border-slate-900/10 px-6">
+                        <div className="-mb-px flex space-x-8">
+                            <TabButton id="upload" label="Upload New Record" icon={<UploadCloud />} activeTab={activeTab} setActiveTab={setActiveTab} />
+                            <TabButton id="request" label="Request Record Access" icon={<HeartHandshake />} activeTab={activeTab} setActiveTab={setActiveTab} />
+                            <TabButton id="review" label="Review Shared Records" icon={<FileSearch />} activeTab={activeTab} setActiveTab={setActiveTab} />
+                        </div>
                     </nav>
+                    <div className="p-6">
+                        {activeTab === 'upload' && <UploadSection />}
+                        {activeTab === 'request' && <RequestAccessSection />}
+                        {activeTab === 'review' && <ReviewSection />}
+                    </div>
                 </div>
-
-                {activeTab === 'upload' && <UploadSection />}
-                {activeTab === 'request' && <RequestAccessSection />}
-                {activeTab === 'review' && <ReviewSection />}
             </main>
         </div>
     );
@@ -65,31 +104,30 @@ const TabButton = ({ id, label, icon, activeTab, setActiveTab }) => (
         onClick={() => setActiveTab(id)}
         className={`${
             activeTab === id
-                ? 'border-teal-500 text-teal-600'
-                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-        } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm inline-flex items-center gap-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500`}
+                ? 'border-sky-600 text-sky-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300'
+        } whitespace-nowrap py-4 px-1 border-b-2 font-semibold text-base inline-flex items-center gap-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500`}
     >
         {icon}
         {label}
     </button>
 );
 
-const UploadSection = () => {
+const PatientSearchColumn = ({ onPatientSelect }) => {
     const [searchQuery, setSearchQuery] = useState('');
     const [debouncedQuery] = useDebounce(searchQuery, 300);
     const [searchResults, setSearchResults] = useState([]);
     const [isSearching, setIsSearching] = useState(false);
-    const [patientProfile, setPatientProfile] = useState(null);
-    const [searchMessage, setSearchMessage] = useState('Enter a patient\'s name or wallet address to begin.');
+    const [searchMessage, setSearchMessage] = useState('Start typing to find a patient...');
 
     useEffect(() => {
         const searchPatients = async () => {
             if (debouncedQuery.length < 3) {
                 setSearchResults([]);
                 setIsSearching(false);
+                setSearchMessage(debouncedQuery.length > 0 ? 'Keep typing...' : 'Start typing to find a patient...');
                 return;
             }
-
             setIsSearching(true);
             setSearchMessage('');
             try {
@@ -97,156 +135,114 @@ const UploadSection = () => {
                 if (response.data.success) {
                     setSearchResults(response.data.data);
                     if (response.data.data.length === 0) {
-                        setSearchMessage(`No patients found matching "${debouncedQuery}".`);
+                        setSearchMessage(`No patients found for "${debouncedQuery}".`);
                     }
-                } else {
-                    toast.error('Search failed. Please try again.');
                 }
             } catch (error) {
-                console.error("Failed to search for patients:", error);
-                toast.error("An error occurred while searching.");
-                setSearchMessage("The search service is currently unavailable.");
+                toast.error("Search failed.");
+                setSearchMessage("Error during search.");
             } finally {
                 setIsSearching(false);
             }
         };
-
         searchPatients();
     }, [debouncedQuery]);
 
-    const handleSelectPatient = (patient) => {
-        if (!patient.publicKey) {
-             toast.error("This patient has not completed their security setup.");
-             setSearchMessage("This patient must save their public key before you can upload records for them.");
-             return;
-        }
-        setPatientProfile({ ...patient, walletAddress: patient.address });
-        setSearchQuery('');
-        setSearchResults([]);
-        setSearchMessage('');
-    };
-    
-    const handleClearPatient = () => {
-        setPatientProfile(null);
-        setSearchMessage('Enter a patient\'s name or wallet address to begin.');
-    };
-
-    if (patientProfile) {
-        return (
-            <div className="space-y-6">
-                <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200 flex justify-between items-center">
-                    <div>
-                        <p className="text-sm text-slate-600">Selected Patient:</p>
-                        <p className="font-bold text-slate-800">{patientProfile.name}</p>
-                    </div>
-                    <button 
-                        onClick={handleClearPatient}
-                        className="text-sm font-medium text-teal-600 hover:text-teal-800 flex items-center gap-1">
-                        <CloseIcon /> Change Patient
-                    </button>
-                </div>
-                <VerifiedUploadForm 
-                    patientProfile={patientProfile} 
-                    onUploadSuccess={handleClearPatient} 
-                    allowedCategories={DOCTOR_CATEGORIES} 
-                />
-            </div>
-        )
-    }
-
     return (
-        <div className="bg-white p-6 md:p-8 rounded-lg shadow-sm border border-slate-200">
-            <h2 className="text-xl font-bold text-slate-800 mb-1">Find Patient</h2>
-            <p className="text-slate-500 mb-6">Search for a patient by their name or wallet address to upload a new record.</p>
-            
-            <div className="relative">
+        <div className="border border-slate-200 rounded-lg bg-white p-4 h-full">
+            <h3 className="font-bold text-slate-800 mb-3">Find Patient</h3>
+            <div className="relative mb-3">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <SearchIcon className="text-slate-400" />
+                    <Search className="h-5 w-5 text-slate-400" />
                 </div>
-                <input 
-                    type="text" 
-                    value={searchQuery} 
-                    onChange={(e) => setSearchQuery(e.target.value)} 
-                    placeholder="e.g., Jane Doe or 0x..." 
-                    className="w-full pl-10 pr-10 py-2.5 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500 transition" 
+                <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Name or wallet address..."
+                    className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-sky-500 focus:border-sky-500 transition"
                 />
-                {isSearching && (
-                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
-                        <Spinner />
+                 {isSearching && <div className="absolute inset-y-0 right-0 pr-3 flex items-center"><Loader2 className="h-5 w-5 animate-spin text-slate-400" /></div>}
+            </div>
+            <div className="overflow-y-auto h-[calc(100%-60px)]">
+                {searchResults.length > 0 ? (
+                    <div className="divide-y divide-slate-100">
+                        {searchResults.map((patient) => (
+                            <button key={patient.address} onClick={() => onPatientSelect(patient)} className="w-full text-left p-3 hover:bg-sky-50 rounded-md transition-colors flex items-center gap-3">
+                                <User className="w-5 h-5 text-slate-500 flex-shrink-0" />
+                                <div className="min-w-0">
+                                    <p className="font-medium text-slate-800 truncate">{patient.name}</p>
+                                    <p className="text-xs text-slate-500 font-mono truncate">{patient.address}</p>
+                                </div>
+                            </button>
+                        ))}
                     </div>
+                ) : (
+                    <div className="text-center pt-12 text-slate-500">{searchMessage}</div>
                 )}
             </div>
-
-            {searchResults.length > 0 ? (
-                <div className="mt-4 border border-slate-200 rounded-lg bg-white max-h-60 overflow-y-auto divide-y divide-slate-200">
-                    {searchResults.map((patient) => (
-                        <button 
-                            key={patient.address}
-                            onClick={() => handleSelectPatient(patient)}
-                            className="w-full text-left px-4 py-3 hover:bg-teal-50 transition-colors flex items-center gap-3"
-                        >
-                            <UserIcon className="w-5 h-5 text-slate-500" />
-                            <div>
-                                <p className="font-medium text-slate-800">{patient.name}</p>
-                                <p className="text-xs text-slate-500 font-mono">
-                                    {`${patient.address.substring(0, 12)}...${patient.address.substring(patient.address.length - 8)}`}
-                                </p>
-                            </div>
-                        </button>
-                    ))}
-                </div>
-            ) : (
-                 <div className="text-center py-10">
-                    {searchMessage && <p className="text-slate-500">{searchMessage}</p>}
-                </div>
-            )}
         </div>
     );
 };
 
+// --- UPLOAD SECTION REBUILT WITH TWO-COLUMN LAYOUT ---
+const UploadSection = () => {
+    const [patientProfile, setPatientProfile] = useState(null);
+
+    return (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-1">
+                <PatientSearchColumn onPatientSelect={setPatientProfile} />
+            </div>
+            <div className="lg:col-span-2">
+                {patientProfile ? (
+                    <div className="space-y-4">
+                        <div className="bg-sky-50 p-4 rounded-lg border border-sky-200 flex justify-between items-center">
+                            <div>
+                                <p className="text-sm text-sky-700">Selected Patient:</p>
+                                <p className="font-bold text-sky-900">{patientProfile.name}</p>
+                            </div>
+                            <button onClick={() => setPatientProfile(null)} className="text-sm font-semibold text-sky-600 hover:text-sky-800 flex items-center gap-1">
+                                <CloseIcon className="h-4 w-4" /> Clear
+                            </button>
+                        </div>
+                        <VerifiedUploadForm 
+                            patientProfile={{ ...patientProfile, walletAddress: patientProfile.address }} 
+                            onUploadSuccess={() => setPatientProfile(null)} 
+                            allowedCategories={DOCTOR_CATEGORIES}
+                        />
+                    </div>
+                ) : (
+                    <div className="h-full flex flex-col justify-center items-center text-center p-8 bg-white border border-slate-200 rounded-lg">
+                        <User className="h-16 w-16 text-slate-300 mb-4" />
+                        <h3 className="text-lg font-semibold text-slate-700">Select a Patient</h3>
+                        <p className="text-slate-500 mt-1">Use the search panel on the left to find and select a patient to begin uploading a record.</p>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+// --- REQUEST ACCESS SECTION REBUILT WITH TWO-COLUMN LAYOUT ---
 const RequestAccessSection = () => {
     const { contract } = useWeb3();
-    const [searchQuery, setSearchQuery] = useState('');
-    const [debouncedQuery] = useDebounce(searchQuery, 300);
-    const [searchResults, setSearchResults] = useState([]);
-    const [isSearching, setIsSearching] = useState(false);
     const [patientProfile, setPatientProfile] = useState(null);
-    const [searchMessage, setSearchMessage] = useState('Enter a patient\'s name or wallet address to begin.');
     const [patientRecords, setPatientRecords] = useState([]);
     const [isLoadingRecords, setIsLoadingRecords] = useState(false);
     const [selectedRecords, setSelectedRecords] = useState(new Set());
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     useEffect(() => {
-        const searchPatients = async () => {
-            if (debouncedQuery.length < 3) {
-                setSearchResults([]);
-                setIsSearching(false);
-                return;
-            }
-            setIsSearching(true);
-            try {
-                const response = await axios.get(`http://localhost:3001/api/users/search-patients?q=${debouncedQuery}`);
-                setSearchResults(response.data.data);
-            } catch (error) {
-                toast.error("Search failed.");
-            } finally {
-                setIsSearching(false);
-            }
-        };
-        searchPatients();
-    }, [debouncedQuery]);
-    
-    useEffect(() => {
         const fetchPatientRecords = async () => {
             if (!patientProfile) return;
             setIsLoadingRecords(true);
+            setPatientRecords([]);
             try {
                 const response = await axios.get(`http://localhost:3001/api/users/records/patient/${patientProfile.address}`);
                 setPatientRecords(response.data.data);
             } catch (error) {
                 toast.error("Could not fetch patient's records.");
-                setPatientRecords([]);
             } finally {
                 setIsLoadingRecords(false);
             }
@@ -254,125 +250,87 @@ const RequestAccessSection = () => {
         fetchPatientRecords();
     }, [patientProfile]);
 
-    const handleSelectPatient = (patient) => {
-        setPatientProfile({ ...patient, walletAddress: patient.address });
-        setSearchQuery('');
-        setSearchResults([]);
-    };
-
-    const handleClearPatient = () => {
-        setPatientProfile(null);
-        setPatientRecords([]);
-        setSelectedRecords(new Set());
-    };
-
     const handleRecordSelect = (recordId) => {
         setSelectedRecords(prev => {
             const newSet = new Set(prev);
-            if (newSet.has(recordId)) {
-                newSet.delete(recordId);
-            } else {
-                newSet.add(recordId);
-            }
+            if (newSet.has(recordId)) newSet.delete(recordId);
+            else newSet.add(recordId);
             return newSet;
         });
     };
     
     const handleSubmitRequest = async () => {
-        if (selectedRecords.size === 0) {
-            toast.error("Please select at least one record to request access.");
-            return;
-        }
-        if (!contract || !patientProfile) {
-            toast.error("Contract not loaded or patient not selected.");
-            return;
-        }
-
+        if (selectedRecords.size === 0) return toast.error("Please select at least one record.");
+        if (!contract || !patientProfile) return toast.error("Contract not loaded or patient not selected.");
+        
         setIsSubmitting(true);
-        const toastId = toast.loading("Submitting access request on the blockchain...");
-
+        const toastId = toast.loading("Submitting access request...");
         try {
-            const recordIds = Array.from(selectedRecords);
-            const tx = await contract.requestRecordAccess(patientProfile.address, recordIds);
+            const tx = await contract.requestRecordAccess(patientProfile.address, Array.from(selectedRecords));
             await tx.wait();
-            toast.success("Access request submitted successfully!", { id: toastId });
+            toast.success("Access request submitted!", { id: toastId });
             setSelectedRecords(new Set());
         } catch (error) {
-            console.error("Failed to submit access request:", error);
             toast.error(error?.data?.message || "An error occurred.", { id: toastId });
         } finally {
             setIsSubmitting(false);
         }
     };
     
-    if (patientProfile) {
-        return (
-            <div className="space-y-6">
-                 <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200 flex justify-between items-center">
-                    <div>
-                        <p className="text-sm text-slate-600">Requesting access for:</p>
-                        <p className="font-bold text-slate-800">{patientProfile.name}</p>
-                    </div>
-                    <button onClick={handleClearPatient} className="text-sm font-medium text-teal-600 hover:text-teal-800 flex items-center gap-1">
-                        <CloseIcon /> Change Patient
-                    </button>
-                </div>
-
-                <div className="bg-white p-6 md:p-8 rounded-lg shadow-sm border border-slate-200">
-                    <h3 className="text-lg font-bold text-slate-800 mb-4">Select Records to Request</h3>
-                    {isLoadingRecords ? (
-                        <div className="flex justify-center items-center py-8"><Spinner /></div>
-                    ) : patientRecords.length > 0 ? (
-                        <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
-                           {patientRecords.map(record => (
-                                <label key={record.recordId} className="flex items-center p-3 bg-slate-50 rounded-lg border border-slate-200 cursor-pointer hover:bg-teal-50/50 hover:border-teal-200 transition-colors">
-                                    <input type="checkbox" checked={selectedRecords.has(record.recordId)} onChange={() => handleRecordSelect(record.recordId)} className="h-5 w-5 rounded border-gray-300 text-teal-600 focus:ring-teal-500" />
-                                    <span className="ml-4 font-medium text-slate-700">{record.title}</span>
-                                    <span className="ml-auto text-sm text-slate-500 bg-slate-200 px-2 py-1 rounded-full">{record.category}</span>
-                                </label>
-                           ))}
-                        </div>
-                    ) : (
-                        <p className="text-slate-500 text-center py-8">This patient has no records yet.</p>
-                    )}
-                     <div className="pt-6 mt-6 border-t border-slate-200">
-                        <button onClick={handleSubmitRequest} disabled={isSubmitting || selectedRecords.size === 0} className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:bg-slate-400 disabled:cursor-not-allowed transition-colors shadow-sm">
-                           {isSubmitting ? <><ButtonSpinner /> Submitting...</> : <>Request Access to {selectedRecords.size} Record(s)</>}
-                        </button>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-    
-    // Patient Search UI (same as UploadSection)
     return (
-        <div className="bg-white p-6 md:p-8 rounded-lg shadow-sm border border-slate-200">
-             <h2 className="text-xl font-bold text-slate-800 mb-1">Find Patient</h2>
-            <p className="text-slate-500 mb-6">Search for a patient to view their records and request access.</p>
-            <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><SearchIcon /></div>
-                <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="e.g., Jane Doe or 0x..." className="w-full pl-10 pr-10 py-2.5 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500 transition" />
-                {isSearching && <div className="absolute inset-y-0 right-0 pr-3 flex items-center"><Spinner /></div>}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-1">
+                <PatientSearchColumn onPatientSelect={setPatientProfile} />
             </div>
-            {searchResults.length > 0 && (
-                <div className="mt-4 border border-slate-200 rounded-lg bg-white max-h-60 overflow-y-auto divide-y divide-slate-200">
-                    {searchResults.map((patient) => (
-                        <button key={patient.address} onClick={() => handleSelectPatient(patient)} className="w-full text-left px-4 py-3 hover:bg-teal-50 transition-colors flex items-center gap-3">
-                            <UserIcon className="w-5 h-5 text-slate-500" />
+            <div className="lg:col-span-2">
+                {patientProfile ? (
+                    <div className="space-y-4">
+                        <div className="bg-sky-50 p-4 rounded-lg border border-sky-200 flex justify-between items-center">
                             <div>
-                                <p className="font-medium text-slate-800">{patient.name}</p>
-                                <p className="text-xs text-slate-500 font-mono">{`${patient.address.substring(0, 12)}...${patient.address.substring(patient.address.length - 8)}`}</p>
+                                <p className="text-sm text-sky-700">Requesting access for:</p>
+                                <p className="font-bold text-sky-900">{patientProfile.name}</p>
                             </div>
-                        </button>
-                    ))}
-                </div>
-            )}
+                            <button onClick={() => setPatientProfile(null)} className="text-sm font-semibold text-sky-600 hover:text-sky-800 flex items-center gap-1">
+                                <CloseIcon className="h-4 w-4" /> Clear
+                            </button>
+                        </div>
+                        <div className="bg-white p-6 border border-slate-200 rounded-lg">
+                            <h3 className="text-lg font-bold text-slate-800 mb-4">Select Records to Request</h3>
+                            {isLoadingRecords ? (
+                                <div className="flex justify-center items-center py-8"><Loader2 className="h-8 w-8 animate-spin text-slate-400" /></div>
+                            ) : patientRecords.length > 0 ? (
+                                <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
+                                    {patientRecords.map(record => (
+                                        <label key={record.recordId} className="flex items-center p-3 bg-slate-50 rounded-lg border border-slate-200 cursor-pointer hover:bg-sky-50/50 hover:border-sky-200 transition-colors">
+                                            <input type="checkbox" checked={selectedRecords.has(record.recordId)} onChange={() => handleRecordSelect(record.recordId)} className="h-5 w-5 rounded border-gray-300 text-sky-600 focus:ring-sky-500" />
+                                            <span className="ml-4 font-medium text-slate-700">{record.title}</span>
+                                            <span className="ml-auto text-sm text-slate-500 bg-slate-200 px-2 py-1 rounded-full">{record.category}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="text-slate-500 text-center py-8">This patient has no records available to request.</p>
+                            )}
+                             <div className="pt-6 mt-6 border-t border-slate-200">
+                                <button onClick={handleSubmitRequest} disabled={isSubmitting || selectedRecords.size === 0} className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 font-semibold text-white bg-sky-600 rounded-lg hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 disabled:bg-slate-400 disabled:cursor-not-allowed transition-colors shadow-sm">
+                                    {isSubmitting ? <><Loader2 className="h-5 w-5 animate-spin" /> Submitting...</> : <>Request Access to {selectedRecords.size} Record(s)</>}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="h-full flex flex-col justify-center items-center text-center p-8 bg-white border border-slate-200 rounded-lg">
+                        <User className="h-16 w-16 text-slate-300 mb-4" />
+                        <h3 className="text-lg font-semibold text-slate-700">Select a Patient</h3>
+                        <p className="text-slate-500 mt-1">Use the search panel on the left to find a patient and view their available records.</p>
+                    </div>
+                )}
+            </div>
         </div>
     );
 };
 
-// --- FIX: This entire section has been rewritten ---
+// --- REVIEW SECTION REBUILT WITH PATIENT CARDS & TABLE ---
 const ReviewSection = () => {
     const { account } = useWeb3();
     const [patientGroups, setPatientGroups] = useState([]);
@@ -386,12 +344,9 @@ const ReviewSection = () => {
             if (response.data.success) {
                 setPatientGroups(response.data.data);
             } else {
-                toast.error("Failed to fetch shared records.");
                 setPatientGroups([]);
             }
         } catch (error) {
-            console.error("Error fetching shared records:", error);
-            toast.error("An error occurred while fetching records.");
             setPatientGroups([]);
         } finally {
             setIsLoading(false);
@@ -403,26 +358,21 @@ const ReviewSection = () => {
     }, [fetchSharedRecords]);
 
     if (isLoading) {
-        return (
-            <div className="flex justify-center items-center p-12 bg-white rounded-lg shadow-sm border-slate-200">
-                <Spinner />
-                <p className="ml-4 text-slate-500">Searching for records shared with you...</p>
-            </div>
-        );
+        return <div className="flex justify-center items-center p-12"><Loader2 className="h-8 w-8 animate-spin text-slate-400" /> <p className="ml-4 text-slate-500">Loading shared records...</p></div>;
     }
 
     if (patientGroups.length === 0) {
         return (
-            <div className="text-center p-12 bg-white rounded-lg shadow-sm border-slate-200">
-                <InfoIcon />
+            <div className="text-center p-12 bg-slate-50 rounded-lg">
+                <Info className="h-12 w-12 mx-auto text-slate-400" />
                 <h3 className="mt-4 text-lg font-medium text-slate-800">No Records Found</h3>
-                <p className="mt-1 text-slate-500">No patients have shared medical records with you yet.</p>
+                <p className="mt-1 text-slate-500">Patients who share records with you will appear here.</p>
             </div>
-        )
+        );
     }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-8">
             {patientGroups.map(({ patient, records }) => (
                 <PatientRecordGroup key={patient.address} patient={patient} records={records} />
             ))}
@@ -434,26 +384,25 @@ const PatientRecordGroup = ({ patient, records }) => {
     const [isOpen, setIsOpen] = useState(true);
 
     return (
-        <div className="bg-white rounded-lg shadow-sm border border-slate-200">
-            <button 
-                onClick={() => setIsOpen(!isOpen)}
-                className="w-full flex justify-between items-center p-4 text-left"
-            >
-                <div>
-                    <h3 className="font-bold text-slate-800">{patient.name}</h3>
-                    <p className="text-sm text-slate-500 font-mono">{patient.address}</p>
+        <div className="bg-white rounded-xl shadow-md border border-slate-200/80 overflow-hidden">
+            <button onClick={() => setIsOpen(!isOpen)} className="w-full flex justify-between items-center p-4 text-left hover:bg-slate-50/50 transition-colors">
+                <div className="flex items-center gap-3">
+                    <User className="w-6 h-6 text-slate-500" />
+                    <div>
+                        <h3 className="font-bold text-slate-800 text-lg">{patient.name}</h3>
+                        <p className="text-sm text-slate-500 font-mono">{patient.address}</p>
+                    </div>
                 </div>
                 <div className="flex items-center gap-4">
-                     <span className="text-sm font-medium bg-teal-100 text-teal-800 px-3 py-1 rounded-full">{records.length} Record(s)</span>
-                    <ChevronDownIcon className={`transform transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                    <span className="text-sm font-medium bg-sky-100 text-sky-800 px-3 py-1 rounded-full">{records.length} Record(s)</span>
+                    <ChevronDown className={`h-6 w-6 text-slate-400 transform transition-transform ${isOpen ? 'rotate-180' : ''}`} />
                 </div>
             </button>
             {isOpen && (
-                <div className="p-4 border-t border-slate-200">
+                <div className="border-t border-slate-200">
                     <DoctorRecordList records={records} />
                 </div>
             )}
         </div>
     );
 };
-

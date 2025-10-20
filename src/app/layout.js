@@ -1,27 +1,44 @@
+import { Inter } from "next/font/google";
 import "./globals.css";
-import Header from "@/components/Header";
-import Footer from "@/components/Footer";
 import { Web3Provider } from "@/context/Web3Context";
-import { Toaster } from "react-hot-toast"; // Import the Toaster component
+import Header from "@/components/Header";
+import { Toaster } from "react-hot-toast";
+import Footer from "@/components/Footer";
+
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata = {
-  title: "PRISM - Patient Record Integirity and Security Management",
-  description: "A decentralized medical records management system.",
+  title: "MediChain",
+  description: "Secure Medical Records on the Blockchain",
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body className="bg-slate-50 text-slate-800">
+      <body className={`${inter.className} bg-gray-50`}>
+        {/* Animated Background Container */}
+        <div className="area">
+            <ul className="circles">
+                <li></li>
+                <li></li>
+                <li></li>
+                <li></li>
+                <li></li>
+                <li></li>
+                <li></li>
+                <li></li>
+                <li></li>
+                <li></li>
+            </ul>
+        </div>
+        
+        <Toaster position="top-center" reverseOrder={false} />
         <Web3Provider>
-          {/* This component will render all our toast notifications */}
-          <Toaster
-            position="top-center"
-            reverseOrder={false}
-          />
-          <Header />
-          <main>{children}</main>
-          <Footer />
+          <div className="relative z-10 flex flex-col min-h-screen">
+            <Header />
+            <main className="flex-grow">{children}</main>
+            <Footer />
+          </div>
         </Web3Provider>
       </body>
     </html>
