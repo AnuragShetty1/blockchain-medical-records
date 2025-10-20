@@ -1,16 +1,21 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // [NEW] This 'images' section is added to solve the error.
-  images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'gateway.pinata.cloud',
-        port: '',
-        pathname: '/ipfs/**',
-      },
-    ],
-  },
+    // This 'images' section is updated to include both Pinata and the placeholder service.
+    images: {
+        remotePatterns: [
+            {
+                protocol: 'https',
+                hostname: 'gateway.pinata.cloud',
+                port: '',
+                pathname: '/ipfs/**',
+            },
+            {
+                protocol: 'https',
+                hostname: 'placehold.co',
+            },
+        ],
+    },
 };
 
 export default nextConfig;
+
