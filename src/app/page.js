@@ -122,7 +122,7 @@ export default function Home() {
     );
 
     return (
-        <div className="flex items-center justify-center min-h-[calc(100vh-128px)] px-4 bg-slate-50">
+        <div className="flex items-center justify-center min-h-[calc(100vh-128px)] bg-slate-50">
             {renderContent()}
         </div>
     );

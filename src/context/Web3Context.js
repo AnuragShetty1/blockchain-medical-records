@@ -41,12 +41,12 @@ const web3auth = new Web3Auth({
 
 export const Web3Provider = ({ children }) => {
     // Core Web3 State
+    const [theme, setTheme] = useState('default');
     const [account, setAccount] = useState(null);
     const [contract, setContract] = useState(null);
     const [signer, setSigner] = useState(null);
     const [provider, setProvider] = useState(null);
     const [owner, setOwner] = useState(null);
-
     // User & Session State
     const [userProfile, setUserProfile] = useState(null);
     const [userStatus, setUserStatus] = useState('unregistered'); 
@@ -421,7 +421,8 @@ export const Web3Provider = ({ children }) => {
 
 
     return (
-        <Web3Context.Provider value={{ 
+        <Web3Context.Provider value={{ theme,
+            setTheme,
             signer, account, contract, owner, isRegistered, userProfile, userStatus,
             records, requests, isLoadingProfile, notifications, keyPair, needsPublicKeySetup,
             accessList,
