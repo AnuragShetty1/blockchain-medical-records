@@ -4,6 +4,7 @@ import { useWeb3 } from '@/context/Web3Context';
 import toast from 'react-hot-toast';
 import { ethers } from 'ethers';
 import { rewrapSymmetricKey } from '@/utils/crypto';
+import { fetchFromIPFS } from '@/utils/ipfs'; // --- MODIFICATION: Import the resilient IPFS fetch utility ---
 
 // --- ICONS ---
 const ShareIcon = () => <svg className="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.186 2.25 2.25 0 00-3.933 2.186z" /></svg>;
@@ -76,17 +77,14 @@ export default function AccessManager({
                          throw new Error(`Critical error: Cannot find IPFS hash for record ${record.recordId}.`);
                     }
 
-                    const response = await fetch(`https://ipfs.io/ipfs/${ipfsHash}`);
-                    if (!response.ok) {
-                        throw new Error(`Failed to fetch metadata for record ${record.recordId} from IPFS.`);
-                    }
+                    // --- MODIFICATION: Use the new utility to fetch metadata ---
+                    // This will automatically try multiple gateways if one fails.
+                    const response = await fetchFromIPFS(ipfsHash);
                     const metadata = await response.json();
                     const bundleHash = metadata.encryptedBundleIPFSHash;
                     
-                    const bundleResponse = await fetch(`https://ipfs.io/ipfs/${bundleHash}`);
-                     if (!bundleResponse.ok) {
-                        throw new Error(`Failed to fetch encrypted data for record ${record.recordId} from IPFS.`);
-                    }
+                    // --- MODIFICATION: Use the new utility to fetch the encrypted bundle ---
+                    const bundleResponse = await fetchFromIPFS(bundleHash);
                     const encryptedBundle = await bundleResponse.json();
                     
                     const rewrappedDek = await rewrapSymmetricKey(

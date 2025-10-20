@@ -6,6 +6,7 @@ import { useWeb3 } from '@/context/Web3Context';
 import toast from 'react-hot-toast';
 import { unwrapSymmetricKey } from '@/utils/crypto';
 import { Eye, Loader2, FileText, AlertTriangle } from 'lucide-react';
+import { fetchFromIPFS } from '@/utils/ipfs'; // --- MODIFICATION: Import the resilient IPFS fetch utility ---
 
 
 function RecordMetadataCell({ record, metadataCache, setMetadataCache }) {
@@ -15,11 +16,12 @@ function RecordMetadataCell({ record, metadataCache, setMetadataCache }) {
         if (!metadata && !metadataCache.hasOwnProperty(record.recordId)) {
             const fetchMetadata = async () => {
                 try {
-                    const response = await fetch(`https://ipfs.io/ipfs/${record.ipfsHash}`);
-                    if (!response.ok) throw new Error('Failed to fetch metadata.');
+                    // --- MODIFICATION: Use the new utility to fetch metadata ---
+                    const response = await fetchFromIPFS(record.ipfsHash);
                     const data = await response.json();
                     setMetadataCache(prev => ({ ...prev, [record.recordId]: data || null }));
                 } catch (error) {
+                    console.error("Failed to fetch metadata from all gateways:", error);
                     setMetadataCache(prev => ({ ...prev, [record.recordId]: null }));
                 }
             };
@@ -50,8 +52,8 @@ export default function DoctorRecordList({ records }) {
             const bundleHash = metadata.encryptedBundleIPFSHash;
             if (!bundleHash) throw new Error("Encrypted file hash is missing.");
             
-            const bundleResponse = await fetch(`https://ipfs.io/ipfs/${bundleHash}`);
-            if (!bundleResponse.ok) throw new Error("Could not fetch encrypted file from IPFS.");
+            // --- MODIFICATION: Use the new utility to fetch the encrypted bundle ---
+            const bundleResponse = await fetchFromIPFS(bundleHash);
             const encryptedBundle = await bundleResponse.json();
 
             toast.loading("Unwrapping secure key...", { id: toastId });

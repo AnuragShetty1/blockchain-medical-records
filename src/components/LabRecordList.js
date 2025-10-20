@@ -5,6 +5,7 @@ import { format } from 'date-fns';
 import { useWeb3 } from '@/context/Web3Context';
 import toast from 'react-hot-toast';
 import { unwrapSymmetricKey } from '@/utils/crypto';
+import { fetchFromIPFS } from '@/utils/ipfs'; // --- MODIFICATION: Import the resilient IPFS fetch utility ---
 
 // --- ICONS ---
 const ViewIcon = () => <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.432 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>;
@@ -19,9 +20,8 @@ function RecordMetadataDisplay({ record, metadataCache, setMetadataCache }) {
         if (!metadata && !metadataCache.hasOwnProperty(record.recordId)) {
             const fetchMetadata = async () => {
                 try {
-                    const metadataUrl = `https://ipfs.io/ipfs/${record.ipfsHash}`;
-                    const response = await fetch(metadataUrl);
-                    if (!response.ok) throw new Error('Failed to fetch metadata from IPFS.');
+                    // --- MODIFICATION: Use the new utility to fetch metadata ---
+                    const response = await fetchFromIPFS(record.ipfsHash);
                     const data = await response.json();
                     setMetadataCache(prev => ({ ...prev, [record.recordId]: data || null }));
                 } catch (error) {
@@ -81,9 +81,8 @@ export default function LabRecordList({ records }) {
             const bundleHash = metadata.encryptedBundleIPFSHash;
             if (!bundleHash) throw new Error("Invalid metadata: Encrypted file hash is missing.");
             
-            const bundleUrl = `https://ipfs.io/ipfs/${bundleHash}`;
-            const bundleResponse = await fetch(bundleUrl);
-            if (!bundleResponse.ok) throw new Error("Could not fetch encrypted file from IPFS.");
+            // --- MODIFICATION: Use the new utility to fetch the encrypted bundle ---
+            const bundleResponse = await fetchFromIPFS(bundleHash);
             const encryptedBundle = await bundleResponse.json();
 
             toast.loading("Unwrapping secure key...", { id: toastId });
