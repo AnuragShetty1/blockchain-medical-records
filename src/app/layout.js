@@ -8,7 +8,7 @@ import Footer from "@/components/Footer";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata = {
-  title: "MediChain",
+  title: "PRISM-Patient Record Integrity and Security Management",
   description: "Secure Medical Records on the Blockchain",
 };
 
@@ -16,22 +16,6 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body className={`${inter.className} bg-gray-50`}>
-        {/* Animated Background Container */}
-        <div className="area">
-            <ul className="circles">
-                <li></li>
-                <li></li>
-                <li></li>
-                <li></li>
-                <li></li>
-                <li></li>
-                <li></li>
-                <li></li>
-                <li></li>
-                <li></li>
-            </ul>
-        </div>
-        
         <Toaster position="top-center" reverseOrder={false} />
         <Web3Provider>
           <div className="relative z-10 flex flex-col min-h-screen">

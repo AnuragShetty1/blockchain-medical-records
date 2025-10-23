@@ -41,20 +41,20 @@ export default function Header() {
         : "bg-white shadow-md sticky top-0 z-50";
     
     const navContainer = isDarkTheme
-        ? "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex justify-between items-center"
+        ? "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex justify-between items-center min-w-screen"
         : "container mx-auto px-6 py-3 flex justify-between items-center";
 
     const titleClasses = isDarkTheme
-        ? "text-xl font-bold text-cyan-400 tracking-wider"
+        ? "text-2xl font-bold text-cyan-400 tracking-wider"
         : "text-3xl font-bold text-teal-500";
 
-    const logoSize = isDarkTheme ? 40 : 70;
+    const logoSize = isDarkTheme ? 50 : 50;
 
     return (
         <header className={headerClasses}>
             <nav className={navContainer}>
                 <div className="flex items-center space-x-3">
-                    <Image
+                    <Image className='rounded-lg'
                         src="/logo.png"
                         alt="PRISM Logo"
                         width={logoSize}

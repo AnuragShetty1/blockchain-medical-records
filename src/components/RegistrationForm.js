@@ -22,10 +22,10 @@ const roles = [
     { id: 0, name: 'Patient', description: 'The owner of the medical records.', icon: 'M12 12a5 5 0 110-10 5 5 0 010 10zm0-2a3 3 0 100-6 3 3 0 000 6z', isProfessional: false },
     { id: 1, name: 'Doctor', description: 'A verified healthcare professional.', icon: 'M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 10V9a2 2 0 00-2-2h-3m-4 0V4a2 2 0 012-2h4a2 2 0 012 2v2', isProfessional: true },
     { id: 7, name: 'Lab Technician', description: 'Uploads verified lab test results.', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4', isProfessional: true },
-    { id: 3, name: 'Insurance Provider', description: 'An entity that can request access for claims.', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', isProfessional: true },
-    { id: 4, name: 'Pharmacist', description: 'Dispenses medications and prescriptions.', icon: 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z', isProfessional: true },
-    { id: 5, name: 'Researcher', description: 'Accesses anonymized data for studies.', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z', isProfessional: true },
-    { id: 6, name: 'Guardian', description: 'A legal representative for a patient.', icon: 'M12 15l-4 4m0 0l-4-4m4 4V3', isProfessional: false },
+    // { id: 3, name: 'Insurance Provider', description: 'An entity that can request access for claims.', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', isProfessional: true },
+    // { id: 4, name: 'Pharmacist', description: 'Dispenses medications and prescriptions.', icon: 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z', isProfessional: true },
+    // { id: 5, name: 'Researcher', description: 'Accesses anonymized data for studies.', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z', isProfessional: true },
+    // { id: 6, name: 'Guardian', description: 'A legal representative for a patient.', icon: 'M12 15l-4 4m0 0l-4-4m4 4V3', isProfessional: false },
 ];
 
 const professionalRoles = roles.filter(r => r.isProfessional).map(r => r.id);
