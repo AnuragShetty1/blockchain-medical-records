@@ -7,11 +7,12 @@ import HospitalRequestPending from './HospitalRequestPending';
 // --- FIX: Step 1 ---
 // Import the HospitalRegistrationForm to embed it directly within this component.
 import HospitalRegistrationForm from './HospitalRegistrationForm';
+import ConfirmationModal from './ConfirmationModal'; // <-- 1. IMPORT MODAL
 
 
 const roles = [
     // --- MISTAKE ---
-    // The previous component design had no clear, integrated way for a user to start the 
+    // The previous component design had no clear, integrated way for a user to start the
     // hospital registration process, leading to a disconnected and buggy user experience.
 
     // --- FIX: Step 2 ---
@@ -35,7 +36,7 @@ export default function RegistrationForm() {
     const [name, setName] = useState('');
     const [selectedRole, setSelectedRole] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
-    
+
     const [hospitals, setHospitals] = useState([]);
     const [selectedHospital, setSelectedHospital] = useState('');
     const [hospitalSearch, setHospitalSearch] = useState('');
@@ -45,6 +46,55 @@ export default function RegistrationForm() {
     const scrollContainerRef = useRef(null);
     const [showLeftArrow, setShowLeftArrow] = useState(false);
     const [showRightArrow, setShowRightArrow] = useState(true);
+
+     // --- 2. ADD MODAL STATE ---
+     const [modalState, setModalState] = useState({
+        isOpen: false,
+        title: '',
+        message: '',
+        onConfirm: () => { },
+        confirmText: '',
+        confirmColor: 'bg-indigo-600',
+    });
+
+    // Function to close the modal
+    const closeModal = () => {
+        if (isLoading) return;
+        setModalState({ ...modalState, isOpen: false });
+    };
+
+    // Function to open the modal for registration confirmation
+    const openConfirm = () => {
+        // Perform initial validation *before* showing the modal
+        if (!account) { toast.error('Please connect your wallet first.'); return; }
+        if (!name) { toast.error('Please enter your full name.'); return; }
+        if (selectedRole === null) { toast.error('Please select a role.'); return; }
+
+        const roleObject = roles.find(r => r.id === selectedRole);
+        if (!roleObject) { toast.error('Invalid role selected.'); return; } // Should not happen
+
+        const isProfessional = professionalRoles.includes(selectedRole);
+        if (isProfessional && selectedHospital === '') {
+            toast.error('Please select a hospital to affiliate with.');
+            return;
+        }
+
+        const hospitalName = isProfessional ? hospitals.find(h => h.hospitalId === selectedHospital)?.name : null;
+        const confirmMessage = isProfessional
+            ? `Are you sure you want to register as a ${roleObject.name} and request affiliation with ${hospitalName}?`
+            : `Are you sure you want to register as a ${roleObject.name}?`;
+
+        setModalState({
+            isOpen: true,
+            title: 'Confirm Registration',
+            message: confirmMessage,
+            onConfirm: confirmSubmit, // Point to the function with the actual logic
+            confirmText: 'Register',
+            confirmColor: 'bg-teal-600'
+        });
+    };
+    // --- END OF MODAL STATE ---
+
 
     if (userStatus === 'pending_hospital' || userStatus === 'rejected') {
         return <HospitalRequestPending />;
@@ -106,22 +156,16 @@ export default function RegistrationForm() {
         }
     };
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        if (!account) { toast.error('Please connect your wallet first.'); return; }
-        if (!name) { toast.error('Please enter your full name.'); return; }
-        if (selectedRole === null) { toast.error('Please select a role.'); return; }
-
-        const isProfessional = professionalRoles.includes(selectedRole);
-        if (isProfessional && selectedHospital === '') { 
-            toast.error('Please select a hospital to affiliate with.'); 
-            return; 
-        }
+    // --- 3. RENAMED ORIGINAL FUNCTION & MOVED LOGIC ---
+    const confirmSubmit = async () => {
+        // Validation already done in openConfirm
 
         setIsLoading(true);
         const toastId = toast.loading('Processing registration...');
 
         try {
+            const isProfessional = professionalRoles.includes(selectedRole);
+
             if (isProfessional) {
                 toast.loading('Step 1/2: Creating on-chain identity...', { id: toastId });
                 if (!contract) { throw new Error('Contract not initialized.'); }
@@ -138,11 +182,11 @@ export default function RegistrationForm() {
                 const response = await fetch('http://localhost:3001/api/users/request-association', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        name: name, 
-                        address: account, 
+                    body: JSON.stringify({
+                        name: name,
+                        address: account,
                         role: roleObject.name,
-                        requestedHospitalId: selectedHospital 
+                        requestedHospitalId: selectedHospital
                     }),
                 });
 
@@ -150,16 +194,16 @@ export default function RegistrationForm() {
                 if (!response.ok) {
                     throw new Error(data.message || `HTTP error! Status: ${response.status}`);
                 }
-                
+
                 toast.success('Request submitted! Please wait for admin approval.', { id: toastId });
 
-            } else {
+            } else { // Patient Registration
                 toast.loading('Step 1/2: Creating on-chain identity...', { id: toastId });
                 if (!contract) { throw new Error('Contract not initialized.'); }
                 const tx = await contract.registerUser(name, selectedRole);
                 await tx.wait();
                 toast.success('On-chain identity created!', { id: toastId });
-                
+
                 toast.loading('Step 2/2: Setting up your account...', { id: toastId });
                 const response = await fetch('http://localhost:3001/api/users/register-patient', {
                     method: 'POST',
@@ -176,15 +220,22 @@ export default function RegistrationForm() {
                 }
                 toast.success('Account setup complete! Redirecting...', { id: toastId });
             }
-            
-            await checkUserRegistration();
+
+            await checkUserRegistration(); // Refetch user status after successful registration
 
         } catch (error) {
             console.error("Registration failed:", error);
             toast.error(error.message || "Registration failed.", { id: toastId });
         } finally {
             setIsLoading(false);
+            closeModal(); // Close modal on completion or error
         }
+    };
+
+     // --- 4. MODIFY FORM SUBMISSION HANDLER ---
+     const handleSubmit = (e) => {
+        e.preventDefault();
+        openConfirm(); // Open the confirmation modal instead of running logic directly
     };
 
     const isProfessionalRoleSelected = selectedRole !== null && professionalRoles.includes(selectedRole);
@@ -217,25 +268,24 @@ export default function RegistrationForm() {
                     </button>
                 )}
             </div>
-            
+
             {/* --- FIX: Step 3 --- */}
-            {/* Conditional rendering is now used. If the user selects the special 'register_hospital' role, */}
-            {/* the <HospitalRegistrationForm /> is rendered. Otherwise, the standard user registration form is shown. */}
-            {/* This unifies the two flows into a single, seamless component, fixing both the duplicate UI and the */}
-            {/* automatic page transition bug. */}
             {selectedRole === 'register_hospital' ? (
                 <div className="pt-4">
+                    {/* --- 5. PASS CONFIRMATION MODAL LOGIC TO CHILD --- */}
+                    {/* HospitalRegistrationForm will now also need modal logic */}
                     <HospitalRegistrationForm />
                 </div>
             ) : (
+                 // --- 6. POINT FORM ONSUBMIT TO THE NEW HANDLER ---
                 <form onSubmit={handleSubmit} className="space-y-6 pt-4">
                     <div className="relative">
                         <svg className="w-6 h-6 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
                         <input id="name" type="text" value={name} onChange={(e) => setName(e.target.value)}
                             className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500"
-                            placeholder="Enter your full name" required />
+                            placeholder="Enter your full name" required disabled={isLoading}/>
                     </div>
-                    
+
                     {isProfessionalRoleSelected && (
                         <div className="relative" ref={hospitalDropdownRef}>
                             <svg className="w-6 h-6 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 z-10" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
@@ -243,7 +293,8 @@ export default function RegistrationForm() {
                                 onChange={(e) => { setHospitalSearch(e.target.value); setSelectedHospital(''); setIsDropdownOpen(true); }}
                                 onFocus={() => setIsDropdownOpen(true)}
                                 placeholder="Search and select your hospital"
-                                className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500 bg-white" />
+                                className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500 bg-white"
+                                disabled={isLoading} />
                             {isDropdownOpen && (
                                 <div className="absolute z-20 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                                     {filteredHospitals.length > 0 ? (
@@ -258,15 +309,26 @@ export default function RegistrationForm() {
                             )}
                         </div>
                     )}
-                    
+
                     <div>
                         <button type="submit" disabled={isLoading || selectedRole === null} className="w-full px-4 py-3 font-bold text-white bg-teal-600 rounded-lg hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:bg-slate-400 transition-colors shadow-lg hover:shadow-xl">
-                            {isLoading ? 'Processing...' : (isProfessionalRoleSelected ? 'Request Affiliation' : 'Create On-Chain Identity')}
+                            {isLoading ? 'Processing...' : (isProfessionalRoleSelected ? 'Confirm & Request Affiliation' : 'Confirm & Create Identity')}
                         </button>
                     </div>
                 </form>
             )}
+
+             {/* --- 7. RENDER THE MODAL --- */}
+            <ConfirmationModal
+                isOpen={modalState.isOpen}
+                onClose={closeModal}
+                onConfirm={modalState.onConfirm}
+                title={modalState.title}
+                message={modalState.message}
+                confirmText={modalState.confirmText}
+                confirmColor={modalState.confirmColor}
+                isLoading={isLoading} // Tie loading to existing state
+            />
         </div>
     );
 }
-
