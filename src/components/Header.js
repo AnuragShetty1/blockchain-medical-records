@@ -9,7 +9,8 @@ const BellIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewB
 
 export default function Header() {
     // --- MODIFICATION: The 'theme' state is now read from the context. ---
-    const { account, connectWallet, disconnectWallet, userProfile, notifications, theme } = useWeb3();
+    // --- FIX 1 of 2: Ask for 'disconnect' (which the context provides) ---
+    const { account, connectWallet, disconnect, userProfile, notifications, theme } = useWeb3();
     const [showNotifications, setShowNotifications] = useState(false);
     const notificationRef = useRef(null);
 
@@ -108,7 +109,8 @@ export default function Header() {
 
                     {account ? (
                         <button
-                            onClick={disconnectWallet}
+                            // --- FIX 2 of 2: Call the 'disconnect' function ---
+                            onClick={disconnect}
                             className={isDarkTheme 
                                 ? "bg-red-600/80 hover:bg-red-500 border border-red-500/50 text-white font-bold py-2 px-4 rounded-md transition-all hover:scale-105"
                                 : "bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-full transition-colors"}
@@ -128,5 +130,4 @@ export default function Header() {
         </header>
     );
 }
-
 
