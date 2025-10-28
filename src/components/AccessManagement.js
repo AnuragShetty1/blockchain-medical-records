@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useWeb3 } from '@/context/Web3Context';
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import ConfirmationModal from './ConfirmationModal'; // <-- 1. IMPORT MODAL
 
 // --- ICONS ---
 const RevokeIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>;
@@ -32,7 +33,37 @@ export default function AccessManagement() {
     const { account, contract } = useWeb3();
     const [grants, setGrants] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [isRevoking, setIsRevoking] = useState(null);
+    const [isRevoking, setIsRevoking] = useState(null); // Keep this for button loading state
+
+    // --- 2. ADD MODAL STATE ---
+    const [modalState, setModalState] = useState({
+        isOpen: false,
+        title: '',
+        message: '',
+        onConfirm: () => { },
+        confirmText: '',
+        confirmColor: 'bg-indigo-600',
+    });
+
+    // Function to close the modal (respecting the loading state)
+    const closeModal = () => {
+        if (isRevoking) return; // Use existing loading state
+        setModalState({ ...modalState, isOpen: false });
+    };
+
+    // Function to open the modal for revoke action
+    const openConfirm = (grant) => {
+        setModalState({
+            isOpen: true,
+            title: 'Revoke Access',
+            message: `Are you sure you want to revoke access for ${grant.professionalName} (${grant.hospitalName}) to ${grant.recordIds.length} record(s)? This action cannot be undone.`,
+            onConfirm: () => handleRevoke(grant.professionalAddress, grant.recordIds),
+            confirmText: 'Revoke Access',
+            confirmColor: 'bg-red-600'
+        });
+    };
+    // --- END OF MODAL STATE ---
+
 
     const fetchGrants = async () => {
         if (!account) return;
@@ -53,15 +84,16 @@ export default function AccessManagement() {
     };
 
     useEffect(() => {
-        if(account) fetchGrants();
+        if (account) fetchGrants();
     }, [account]);
 
     const handleRevoke = async (professionalAddress, recordIds) => {
+        // This function is now called by the modal's onConfirm
         if (!contract) {
             toast.error("Blockchain contract not available.");
             return;
         }
-        setIsRevoking(professionalAddress);
+        setIsRevoking(professionalAddress); // Set loading state for the button
         const toastId = toast.loading("Preparing revocation transaction...");
         try {
             const tx = await contract.revokeMultipleRecordAccess(professionalAddress, recordIds);
@@ -73,7 +105,8 @@ export default function AccessManagement() {
             console.error("Revocation failed:", error);
             toast.error(error?.data?.message || "Revocation transaction failed.", { id: toastId });
         } finally {
-            setIsRevoking(null);
+            setIsRevoking(null); // Clear loading state
+            closeModal(); // Close modal on completion
         }
     };
 
@@ -143,7 +176,7 @@ export default function AccessManagement() {
                                         </td>
                                         <td className="px-6 py-4 text-center">
                                             <button
-                                                onClick={() => handleRevoke(grant.professionalAddress, grant.recordIds)}
+                                                onClick={() => openConfirm(grant)} // <-- 3. MODIFY ONCLICK
                                                 disabled={isRevoking === grant.professionalAddress}
                                                 className="flex items-center justify-center w-full max-w-[120px] mx-auto px-3 py-2 text-xs font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors shadow-sm disabled:bg-slate-400 disabled:cursor-not-allowed"
                                             >
@@ -158,6 +191,18 @@ export default function AccessManagement() {
                     </table>
                 </div>
             </div>
+
+             {/* --- 4. RENDER THE MODAL --- */}
+             <ConfirmationModal
+                isOpen={modalState.isOpen}
+                onClose={closeModal}
+                onConfirm={modalState.onConfirm}
+                title={modalState.title}
+                message={modalState.message}
+                confirmText={modalState.confirmText}
+                confirmColor={modalState.confirmColor}
+                isLoading={isRevoking !== null} // Tie loading to existing state
+            />
         </div>
     );
 }

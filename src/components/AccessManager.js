@@ -5,21 +5,24 @@ import toast from 'react-hot-toast';
 import { ethers } from 'ethers';
 import { rewrapSymmetricKey } from '@/utils/crypto';
 import { fetchFromIPFS } from '@/utils/ipfs'; // --- MODIFICATION: Import the resilient IPFS fetch utility ---
+import ConfirmationModal from './ConfirmationModal'; // <-- 1. IMPORT MODAL
 
 // --- ICONS ---
 const ShareIcon = () => <svg className="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.186 2.25 2.25 0 00-3.933 2.186z" /></svg>;
 const CloseIcon = () => <svg className="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>;
+const SpinnerWhite = () => <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>;
 
-export default function AccessManager({ 
-    isOpen, 
-    onClose, 
+
+export default function AccessManager({
+    isOpen,
+    onClose,
     onGrantSuccess,
-    records: initialRecords, 
-    preselectedRecords, 
-    preselectedProfessional 
+    records: initialRecords,
+    preselectedRecords,
+    preselectedProfessional
 }) {
     const { contract, keyPair } = useWeb3();
-    
+
     // FIX: The component now correctly uses the preselected professional's address and disables the input for the approval flow.
     const [granteeAddress, setGranteeAddress] = useState(preselectedProfessional?.address || '');
     const [duration, setDuration] = useState('30');
@@ -33,13 +36,30 @@ export default function AccessManager({
     const isBulkShare = records.length > 1;
     const finalDuration = duration === 'custom' ? Number(customDuration) : Number(duration);
 
-    const handleGrantAccess = async (e) => {
-        e.preventDefault();
-        if (!ethers.isAddress(granteeAddress)) {
+    // --- 2. ADD MODAL STATE ---
+    const [modalState, setModalState] = useState({
+        isOpen: false,
+        title: '',
+        message: '',
+        onConfirm: () => { },
+        confirmText: '',
+        confirmColor: 'bg-indigo-600',
+    });
+
+    // Function to close the modal (respecting the loading state)
+    const closeModal = () => {
+        if (isLoading) return; // Use existing loading state
+        setModalState({ ...modalState, isOpen: false });
+    };
+
+    // Function to open the modal for grant action
+    const openConfirm = () => {
+        // Perform initial validation *before* showing the modal
+         if (!ethers.isAddress(granteeAddress)) {
             toast.error("Please enter a valid Ethereum wallet address.");
             return;
         }
-        if (!records || records.length === 0 || !contract || !keyPair) {
+         if (!records || records.length === 0 || !contract || !keyPair) {
             toast.error("Required context (records, contract, or key pair) is missing. Please reconnect wallet and try again.");
             return;
         }
@@ -47,6 +67,26 @@ export default function AccessManager({
             toast.error("Please enter a valid number of days for the custom duration.");
             return;
         }
+
+        // Get professional name if available (for better message)
+        const professionalName = preselectedProfessional?.name || granteeAddress;
+
+        setModalState({
+            isOpen: true,
+            title: 'Confirm Access Grant',
+            message: `Are you sure you want to grant access to ${records.length} record(s) for ${professionalName} for ${finalDuration} days?`,
+            onConfirm: confirmGrantAccess, // Set the actual grant function as the confirm action
+            confirmText: 'Grant Access',
+            confirmColor: 'bg-teal-600'
+        });
+    };
+    // --- END OF MODAL STATE ---
+
+
+    // --- 3. RENAMED ORIGINAL FUNCTION & MOVED LOGIC ---
+    // This function now contains the core logic previously in handleGrantAccess
+    const confirmGrantAccess = async () => {
+        // No need for validation here, it was done in openConfirm
 
         setIsLoading(true);
         const toastId = toast.loading("Verifying professional and checking permissions...");
@@ -64,7 +104,7 @@ export default function AccessManager({
             }
 
             toast.loading("Fetching encrypted data and preparing secure keys...", { id: toastId });
-            
+
             const professionalPublicKey = professional.publicKey;
             const recordIdsToGrant = records.map(r => r.recordId);
 
@@ -72,21 +112,20 @@ export default function AccessManager({
                 records.map(async (record) => {
                     const fullRecordData = await contract.records(record.recordId);
                     const ipfsHash = fullRecordData.ipfsHash;
-                    
+
                     if (!ipfsHash) {
-                         throw new Error(`Critical error: Cannot find IPFS hash for record ${record.recordId}.`);
+                           throw new Error(`Critical error: Cannot find IPFS hash for record ${record.recordId}.`);
                     }
 
                     // --- MODIFICATION: Use the new utility to fetch metadata ---
-                    // This will automatically try multiple gateways if one fails.
                     const response = await fetchFromIPFS(ipfsHash);
                     const metadata = await response.json();
                     const bundleHash = metadata.encryptedBundleIPFSHash;
-                    
+
                     // --- MODIFICATION: Use the new utility to fetch the encrypted bundle ---
                     const bundleResponse = await fetchFromIPFS(bundleHash);
                     const encryptedBundle = await bundleResponse.json();
-                    
+
                     const rewrappedDek = await rewrapSymmetricKey(
                         encryptedBundle,
                         keyPair.privateKey,
@@ -106,40 +145,52 @@ export default function AccessManager({
 
             await tx.wait();
             toast.success(`Access granted successfully for ${finalDuration} days!`, { id: toastId });
-            
+
             // FIX: Call the correct success handler depending on the flow.
             if (onGrantSuccess) {
                 onGrantSuccess();
             } else {
-                onClose();
+                onClose(); // Call original onClose if no specific success handler
             }
+            closeModal(); // Close the confirmation modal
 
         } catch (error) {
             console.error("Failed to grant access:", error);
             let errorMessage = "An unexpected error occurred.";
-              if (error.reason) {
-                  errorMessage = error.reason;
-              } else if (error.message) {
-                  errorMessage = error.message;
-              }
+              if (error.reason) { // Ethers v6 contract revert reason
+                errorMessage = error.reason;
+            } else if (error.message) {
+                errorMessage = error.message;
+            }
             toast.error(errorMessage, { id: toastId });
+            // Don't close modal on error, let user try again or cancel
         } finally {
             setIsLoading(false);
+            // Don't close modal here in finally, only on success or explicit cancel
         }
     };
-    
+
+    // --- 4. MODIFY FORM SUBMISSION HANDLER ---
+    // This now only calls openConfirm to show the modal
+    const handleGrantAccessSubmit = async (e) => {
+         e.preventDefault();
+         openConfirm(); // Open the confirmation modal instead of running logic directly
+     };
+
+
     // The component is rendered by the parent, so we check the `isOpen` prop.
     if (!isOpen) {
         return null;
     }
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 animate-fade-in"> {/* Removed backdrop-blur-sm */}
             <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-xl border border-slate-200 p-8">
                 <button
-                    onClick={onClose}
+                    onClick={onClose} // Use original onClose prop for manual closing
                     className="absolute top-4 right-4 text-slate-400 hover:text-slate-800 transition-colors"
                     aria-label="Close"
+                     disabled={isLoading} // Prevent closing while processing
                 >
                     <CloseIcon />
                 </button>
@@ -158,7 +209,8 @@ export default function AccessManager({
                     </div>
                 </div>
 
-                <form onSubmit={handleGrantAccess} className="space-y-6">
+                {/* --- 5. POINT FORM ONSUBMIT TO THE NEW HANDLER --- */}
+                <form onSubmit={handleGrantAccessSubmit} className="space-y-6">
                     <div>
                         <label htmlFor="granteeAddress" className="block text-sm font-medium text-slate-700 mb-2">
                             Professional's Wallet Address
@@ -171,7 +223,7 @@ export default function AccessManager({
                             placeholder="Enter wallet address (0x...)"
                             className="w-full px-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500 transition disabled:bg-slate-100"
                             required
-                            disabled={!!preselectedProfessional}
+                            disabled={!!preselectedProfessional || isLoading} // Disable while loading
                         />
                     </div>
 
@@ -184,7 +236,8 @@ export default function AccessManager({
                                 id="duration"
                                 value={duration}
                                 onChange={(e) => setDuration(e.target.value)}
-                                className="w-full px-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500 bg-white"
+                                className="w-full px-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500 bg-white disabled:bg-slate-100"
+                                 disabled={isLoading} // Disable while loading
                             >
                                 <option value={30}>30 Days</option>
                                 <option value={90}>90 Days</option>
@@ -204,8 +257,9 @@ export default function AccessManager({
                                     value={customDuration}
                                     onChange={(e) => setCustomDuration(e.target.value)}
                                     placeholder="e.g., 7"
-                                    className="w-full px-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500"
+                                    className="w-full px-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500 disabled:bg-slate-100"
                                     required
+                                     disabled={isLoading} // Disable while loading
                                 />
                             </div>
                         )}
@@ -217,11 +271,24 @@ export default function AccessManager({
                             disabled={isLoading}
                             className="w-full flex items-center justify-center gap-2 px-4 py-3 font-bold text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:bg-slate-400 transition-colors shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500"
                         >
-                            {isLoading ? 'Processing...' : 'Grant Access'}
+                             {/* Keep button text simple, modal handles confirmation text */}
+                             Grant Access
                         </button>
                     </div>
                 </form>
             </div>
+
+             {/* --- 6. RENDER THE CONFIRMATION MODAL --- */}
+            <ConfirmationModal
+                isOpen={modalState.isOpen}
+                onClose={closeModal}
+                onConfirm={modalState.onConfirm}
+                title={modalState.title}
+                message={modalState.message}
+                confirmText={modalState.confirmText}
+                confirmColor={modalState.confirmColor}
+                isLoading={isLoading} // Tie loading to existing state
+            />
         </div>
     );
 }

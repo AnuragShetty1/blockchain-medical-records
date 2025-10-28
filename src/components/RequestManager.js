@@ -4,6 +4,7 @@ import { useWeb3 } from '@/context/Web3Context';
 import toast from 'react-hot-toast';
 import axios from 'axios';
 import AccessManager from './AccessManager';
+import ConfirmationModal from './ConfirmationModal'; // <-- 1. IMPORT MODAL
 
 // --- ICONS (unchanged) ---
 const Spinner = () => <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-slate-500"></div>;
@@ -20,8 +21,38 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
     const [selectedRequestForApproval, setSelectedRequestForApproval] = useState(null);
     const [processingId, setProcessingId] = useState(null);
 
-    // --- REMOVED: All internal data fetching logic (fetchProfessionalRequests, useEffect) ---
-    // The dashboard now provides the data.
+    // --- 2. ADD MODAL STATE ---
+    const [modalState, setModalState] = useState({
+        isOpen: false,
+        title: '',
+        message: '',
+        onConfirm: () => { },
+        confirmText: '',
+        confirmColor: 'bg-indigo-600',
+    });
+
+    // Function to close the modal (respecting the loading state)
+    const closeModal = () => {
+        if (processingId) return; // Use existing loading state
+        setModalState({ ...modalState, isOpen: false });
+    };
+
+    // Function to open the modal (currently only for reject)
+    const openConfirm = (actionType, item) => {
+        if (actionType === 'reject') {
+            setModalState({
+                isOpen: true,
+                title: 'Reject Request',
+                message: `Are you sure you want to reject the access request from ${item.professional}? This action cannot be undone.`,
+                onConfirm: () => handleProfessionalResponse(item.requestId, 'rejected'),
+                confirmText: 'Reject',
+                confirmColor: 'bg-red-600'
+            });
+        }
+        // Add cases for 'approveInsurance' if needed later
+    };
+    // --- END OF MODAL STATE ---
+
 
     const handleDurationChange = (requestId, value) => {
         setDurations(prev => ({ ...prev, [requestId]: value }));
@@ -42,10 +73,12 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
             toast.error('Failed to approve request.', { id: toastId });
         } finally {
             setProcessingId(null);
+            // closeModal(); // Close if confirmation added later
         }
     };
 
     const handleProfessionalResponse = async (requestId, response) => {
+        // This function is now primarily called by the modal's onConfirm for 'rejected'
         setProcessingId(requestId);
         const toastId = toast.loading(`Processing your response...`);
         try {
@@ -57,17 +90,21 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
             toast.error(`Failed to ${response} request.`, { id: toastId });
         } finally {
             setProcessingId(null);
+            closeModal(); // Close modal on completion
         }
     };
 
     const handleApproveProfessionalClick = (request) => {
+        // Confirmation for Approval likely belongs in AccessManager, so this remains unchanged for now
         setSelectedRequestForApproval(request);
         setIsAccessManagerOpen(true);
     };
 
     const onGrantSuccess = () => {
+        // Called by AccessManager after successful grant
         if (selectedRequestForApproval) {
-            handleProfessionalResponse(selectedRequestForApproval.requestId, 'approved');
+            // Mark the original request as approved in the backend *after* successful grant
+             handleProfessionalResponse(selectedRequestForApproval.requestId, 'approved');
         }
         setIsAccessManagerOpen(false);
         setSelectedRequestForApproval(null);
@@ -75,8 +112,8 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
 
     const combinedRequests = [
         ...(professionalRequests || []).map(r => ({ ...r, type: 'Professional' })),
-        ...(insuranceRequests || []).map(r => ({ ...r, type: 'Insurance', requestId: `ins-${Number(r.id)}`}))
-    ].sort((a,b) => new Date(b.createdAt || b.timestamp) - new Date(a.createdAt || a.timestamp));
+        ...(insuranceRequests || []).map(r => ({ ...r, type: 'Insurance', requestId: `ins-${Number(r.id)}` }))
+    ].sort((a, b) => new Date(b.createdAt || b.timestamp) - new Date(a.createdAt || a.timestamp));
 
 
     return (
@@ -93,9 +130,9 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
                     onGrantSuccess={onGrantSuccess}
                 />
             )}
-            
+
             <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                 <div className="overflow-x-auto">
+                <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left text-slate-500">
                         <thead className="text-xs text-slate-700 uppercase bg-slate-50">
                             <tr>
@@ -131,8 +168,9 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
                                         <td className="px-6 py-4">
                                             {req.type === 'Professional' ? (
                                                 <ul className="list-disc list-inside space-y-1 text-xs">
-                                                    {req.requestedRecords.map(rec => <li key={rec.recordId}>- {rec.title}</li>)}
-                                                 </ul>
+                                                     {/* Ensure requestedRecords is always an array */}
+                                                    {(req.requestedRecords || []).map(rec => <li key={rec.recordId}>- {rec.title}</li>)}
+                                                </ul>
                                             ) : (
                                                 <div className="text-xs"><strong>Claim ID:</strong> {req.claimId}</div>
                                             )}
@@ -140,15 +178,23 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
                                         <td className="px-6 py-4">
                                             {req.type === 'Professional' ? (
                                                 <div className="flex items-center justify-center gap-2">
-                                                    <button onClick={() => handleProfessionalResponse(req.requestId, 'rejected')} disabled={processingId === req.requestId} className="px-3 py-1.5 text-xs font-semibold bg-red-100 text-red-700 rounded-md hover:bg-red-200 disabled:opacity-50 inline-flex items-center">
+                                                    <button
+                                                        onClick={() => openConfirm('reject', req)} // <-- 3. MODIFY ONCLICK
+                                                        disabled={processingId === req.requestId}
+                                                        className="px-3 py-1.5 text-xs font-semibold bg-red-100 text-red-700 rounded-md hover:bg-red-200 disabled:opacity-50 inline-flex items-center"
+                                                    >
                                                         <RejectIcon /> Reject
                                                     </button>
-                                                    <button onClick={() => handleApproveProfessionalClick(req)} disabled={processingId === req.requestId} className="px-3 py-1.5 text-xs font-semibold bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 inline-flex items-center">
+                                                    <button
+                                                        onClick={() => handleApproveProfessionalClick(req)} // Stays the same for now
+                                                        disabled={processingId === req.requestId}
+                                                        className="px-3 py-1.5 text-xs font-semibold bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 inline-flex items-center"
+                                                    >
                                                         <ApproveIcon /> Approve
                                                     </button>
                                                 </div>
                                             ) : (
-                                                 <div className="flex items-center justify-center gap-2">
+                                                <div className="flex items-center justify-center gap-2">
                                                     <input
                                                         type="number"
                                                         min="1"
@@ -156,10 +202,15 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
                                                         onChange={(e) => handleDurationChange(Number(req.id), e.target.value)}
                                                         className="w-20 px-2 py-1 text-xs border border-slate-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
                                                     />
-                                                    <button onClick={() => handleApproveInsurance(Number(req.id))} disabled={processingId === `ins-${Number(req.id)}`} className="px-3 py-1.5 text-xs font-semibold bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 inline-flex items-center">
-                                                        {processingId === `ins-${Number(req.id)}` ? '...' : <><ApproveIcon/><span>Approve</span></>}
+                                                    <button
+                                                        // TODO: Add confirmation for insurance approval if desired
+                                                        onClick={() => handleApproveInsurance(Number(req.id))}
+                                                        disabled={processingId === `ins-${Number(req.id)}`}
+                                                        className="px-3 py-1.5 text-xs font-semibold bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 inline-flex items-center"
+                                                    >
+                                                        {processingId === `ins-${Number(req.id)}` ? <Spinner/> : <><ApproveIcon /><span>Approve</span></>}
                                                     </button>
-                                                 </div>
+                                                </div>
                                             )}
                                         </td>
                                     </tr>
@@ -167,9 +218,20 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
                             )}
                         </tbody>
                     </table>
-                 </div>
+                </div>
             </div>
+
+            {/* --- 4. RENDER THE MODAL --- */}
+            <ConfirmationModal
+                isOpen={modalState.isOpen}
+                onClose={closeModal}
+                onConfirm={modalState.onConfirm}
+                title={modalState.title}
+                message={modalState.message}
+                confirmText={modalState.confirmText}
+                confirmColor={modalState.confirmColor}
+                isLoading={processingId !== null} // Tie loading to existing state
+            />
         </div>
     );
 }
-
