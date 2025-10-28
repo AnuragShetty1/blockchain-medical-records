@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 // We'll use lucide-react for a professional icon set.
 // Make sure to install it: npm install lucide-react
 import { Check, X, Copy, Users, Hourglass, Building } from 'lucide-react';
+import ConfirmationModal from './ConfirmationModal'; // <-- 1. IMPORT MODAL
 
 const StatusBadge = ({ status }) => {
     const statusStyles = {
@@ -58,6 +59,64 @@ export default function AdminDashboard() {
     const [isLoading, setIsLoading] = useState(true);
     const [processingId, setProcessingId] = useState(null);
     const [activeTab, setActiveTab] = useState('pending');
+
+    // --- 2. ADD MODAL STATE ---
+    const [modalState, setModalState] = useState({
+        isOpen: false,
+        title: '',
+        message: '',
+        onConfirm: () => { },
+        confirmText: '',
+        confirmColor: 'bg-indigo-600',
+    });
+
+    // Function to close the modal (respecting the loading state)
+    const closeModal = () => {
+        if (processingId) return; // Use existing loading state
+        setModalState({ ...modalState, isOpen: false });
+    };
+
+    // Function to open the modal based on action type
+    const openConfirm = (actionType, item) => {
+        let title, message, onConfirm, confirmText, confirmColor;
+
+        switch (actionType) {
+            case 'verify':
+                title = 'Approve Professional';
+                message = `Are you sure you want to approve ${item.name}? This will grant them access as a ${item.role}.`;
+                onConfirm = () => handleVerify(item);
+                confirmText = 'Approve';
+                confirmColor = 'bg-green-500';
+                break;
+            case 'reject':
+                title = 'Reject Request';
+                message = `Are you sure you want to reject the request from ${item.name}? This action cannot be undone.`;
+                onConfirm = () => handleReject(item);
+                confirmText = 'Reject';
+                confirmColor = 'bg-red-600';
+                break;
+            case 'revoke':
+                title = 'Revoke Access';
+                message = `Are you sure you want to revoke all access for ${item.name}? They will be immediately disconnected.`;
+                onConfirm = () => handleRevoke(item);
+                confirmText = 'Revoke Access';
+                confirmColor = 'bg-red-600';
+                break;
+            default:
+                return;
+        }
+
+        setModalState({
+            isOpen: true,
+            title,
+            message,
+            onConfirm,
+            confirmText,
+            confirmColor
+        });
+    };
+    // --- END OF MODAL STATE ---
+
 
     const fetchData = useCallback(async () => {
         if (userProfile?.hospitalId === null || userProfile?.hospitalId === undefined) {
@@ -120,6 +179,7 @@ export default function AdminDashboard() {
             toast.error(error.message || "Verification failed.", { id: toastId });
         } finally {
             setProcessingId(null);
+            closeModal(); // Close modal on completion
         }
     };
 
@@ -145,6 +205,7 @@ export default function AdminDashboard() {
             toast.error(error.message || "Revocation failed.", { id: toastId });
         } finally {
             setProcessingId(null);
+            closeModal(); // Close modal on completion
         }
     };
     const handleReject = async (request) => {
@@ -168,6 +229,7 @@ export default function AdminDashboard() {
             toast.error(error.message || "Rejection failed.", { id: toastId });
         } finally {
             setProcessingId(null);
+            closeModal(); // Close modal on completion
         }
     };
 
@@ -227,7 +289,7 @@ export default function AdminDashboard() {
                                     {isPendingList ? (
                                         <div className="flex justify-end gap-2">
                                             <button
-                                                onClick={() => handleReject(item)}
+                                                onClick={() => openConfirm('reject', item)} // <-- 3. MODIFY ONCLICK
                                                 disabled={processingId === item.address || item.professionalStatus === 'verifying'}
                                                 className="flex items-center justify-center gap-1.5 px-3 py-1.5 font-semibold text-sm text-red-700 bg-red-100 rounded-md hover:bg-red-200 disabled:bg-slate-200 disabled:text-slate-500 disabled:cursor-wait transition-all shadow-sm"
                                             >
@@ -235,7 +297,7 @@ export default function AdminDashboard() {
                                                 Reject
                                             </button>
                                             <button
-                                                onClick={() => handleVerify(item)}
+                                                onClick={() => openConfirm('verify', item)} // <-- 4. MODIFY ONCLICK
                                                 disabled={processingId === item.address || item.professionalStatus === 'verifying'}
                                                 className="flex items-center justify-center gap-1.5 px-3 py-1.5 font-semibold text-sm text-white bg-green-500 rounded-md hover:bg-green-600 disabled:bg-slate-400 disabled:cursor-wait transition-all shadow-sm"
                                             >
@@ -245,7 +307,7 @@ export default function AdminDashboard() {
                                         </div>
                                     ) : (
                                         <button
-                                            onClick={() => handleRevoke(item)}
+                                            onClick={() => openConfirm('revoke', item)} // <-- 5. MODIFY ONCLICK
                                             disabled={processingId === item.address || item.professionalStatus === 'revoking'}
                                             className="flex items-center justify-center gap-1.5 px-3 py-1.5 font-semibold text-sm text-white bg-red-600 rounded-md hover:bg-red-700 disabled:bg-slate-400 disabled:cursor-wait transition-all shadow-sm"
                                         >
@@ -330,6 +392,18 @@ export default function AdminDashboard() {
                     </div>
                 </div>
             </div>
+
+            {/* --- 6. RENDER THE MODAL --- */}
+            <ConfirmationModal
+                isOpen={modalState.isOpen}
+                onClose={closeModal}
+                onConfirm={modalState.onConfirm}
+                title={modalState.title}
+                message={modalState.message}
+                confirmText={modalState.confirmText}
+                confirmColor={modalState.confirmColor}
+                isLoading={processingId !== null} // Tie loading to existing state
+            />
         </div>
     );
 }

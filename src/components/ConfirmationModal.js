@@ -82,13 +82,13 @@ export default function ConfirmationModal({
             role="dialog" 
             aria-modal="true"
         >
-            {/* --- THIS LINE IS CHANGED --- */}
-            {/* Backdrop Overlay: Now has a semi-transparent dark bg and a backdrop blur */}
-            <div className="fixed inset-0 bg-gray-900 bg-opacity-50 backdrop-blur-sm transition-opacity" />
+            {/* --- THIS SECTION IS REMOVED ---
+              The visual backdrop div that added the dim/blur effect has been deleted.
+            */}
 
             <div 
                 className="fixed inset-0 z-10 w-screen overflow-y-auto"
-                onClick={handleBackdropClick} // Add click handler to the backdrop
+                onClick={handleBackdropClick} // This div now handles all backdrop clicks
             >
                 <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
                     
