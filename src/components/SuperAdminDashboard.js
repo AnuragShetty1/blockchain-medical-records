@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { useWeb3 } from "@/context/Web3Context"; // Import useWeb3 to control the theme
+import ConfirmationModal from './ConfirmationModal'; // <-- 1. IMPORT MODAL
 
 // --- STYLING ---
 const Spinner = ({ color = 'cyan-400' }) => (
@@ -37,6 +38,17 @@ export default function SuperAdminDashboard() {
     const [actionStates, setActionStates] = useState({});
     const [activityLog, setActivityLog] = useState([]);
     const prevDataRef = useRef();
+
+    // --- 2. ADD MODAL STATE ---
+    const [modalState, setModalState] = useState({
+        isOpen: false,
+        title: '',
+        message: '',
+        onConfirm: () => { },
+        confirmText: 'Confirm',
+        confirmColor: 'bg-indigo-600',
+        isLoading: false
+    });
 
     // This effect now controls the global theme
     useEffect(() => {
@@ -107,7 +119,7 @@ export default function SuperAdminDashboard() {
             });
 
             if (newLogs.length > 0) {
-                setActivityLog(prev => [...newLogs, ...prev].slice(0, 10)); 
+                setActivityLog(prev => [...newLogs, ...prev].slice(0, 10));
             }
         }
         prevDataRef.current = { prevPending: pendingRequests, prevVerified: verifiedHospitals };
@@ -117,19 +129,25 @@ export default function SuperAdminDashboard() {
     const handleVerify = async (requestId, adminAddress) => {
         setError('');
         setActionState(`verify_${requestId}`, true);
+        setModalState(prev => ({ ...prev, isLoading: true })); // <-- Show modal spinner
         try {
             await axios.post(`${API_URL}/verify-hospital`, { requestId, adminAddress });
             await fetchRequestsAndHospitals();
         } catch (err) {
             console.error("Error verifying hospital:", err);
             setError(err.response?.data?.message || 'A critical error occurred during verification.');
-            setActionState(`verify_${requestId}`, false);
+            setActionState(`verify_${requestId}`, false); // Keep button enabled on error
+        } finally {
+            closeModal(); // <-- Close modal on success or error
+            // Note: We don't need to setActionState(..., false) on success
+            // because the item will disappear from the list, resetting the state.
         }
     };
-    
+
     const handleReject = async (requestId) => {
         setError('');
         setActionState(`reject_${requestId}`, true);
+        setModalState(prev => ({ ...prev, isLoading: true })); // <-- Show modal spinner
         try {
             await axios.post(`${API_URL}/reject-hospital`, { requestId });
             await fetchRequestsAndHospitals();
@@ -137,12 +155,15 @@ export default function SuperAdminDashboard() {
             console.error("Error rejecting hospital:", err);
             setError(err.response?.data?.message || 'A critical error occurred during rejection.');
             setActionState(`reject_${requestId}`, false);
+        } finally {
+            closeModal(); // <-- Close modal
         }
     };
 
     const handleRevoke = async (hospitalId) => {
         setError('');
         setActionState(`revoke_${hospitalId}`, true);
+        setModalState(prev => ({ ...prev, isLoading: true })); // <-- Show modal spinner
         try {
             await axios.post(`${API_URL}/revoke-hospital`, { hospitalId });
             await fetchRequestsAndHospitals();
@@ -150,9 +171,53 @@ export default function SuperAdminDashboard() {
             console.error("Error revoking hospital:", err);
             setError(err.response?.data?.message || 'A critical error occurred during revocation.');
             setActionState(`revoke_${hospitalId}`, false);
+        } finally {
+            closeModal(); // <-- Close modal
         }
     };
-    
+
+    // --- 3. ADD MODAL HELPER FUNCTIONS ---
+    const openVerifyModal = (requestId, requesterAddress, hospitalName) => {
+        setModalState({
+            isOpen: true,
+            title: 'Confirm Hospital Verification',
+            message: `Are you sure you want to verify ${hospitalName} (${requesterAddress})? This will allow them to access the system.`,
+            onConfirm: () => handleVerify(requestId, requesterAddress),
+            confirmText: 'Verify',
+            confirmColor: 'bg-green-600',
+            isLoading: false
+        });
+    };
+
+    const openRejectModal = (requestId, hospitalName) => {
+        setModalState({
+            isOpen: true,
+            title: 'Confirm Hospital Rejection',
+            message: `Are you sure you want to reject ${hospitalName}? They will not be able to access the system.`,
+            onConfirm: () => handleReject(requestId),
+            confirmText: 'Reject',
+            confirmColor: 'bg-red-600',
+            isLoading: false
+        });
+    };
+
+    const openRevokeModal = (hospitalId, hospitalName) => {
+        setModalState({
+            isOpen: true,
+            title: 'Confirm Hospital Revocation',
+            message: `Are you sure you want to REVOKE access for ${hospitalName}? This is a destructive action and will immediately lock them out.`,
+            onConfirm: () => handleRevoke(hospitalId),
+            confirmText: 'Yes, Revoke Access',
+            confirmColor: 'bg-red-800', // Stronger red
+            isLoading: false
+        });
+    };
+
+    const closeModal = () => {
+        setModalState({ isOpen: false, onConfirm: () => { }, isLoading: false });
+    };
+
+
     if (isLoading) {
         return <DashboardLoader />;
     }
@@ -192,24 +257,24 @@ export default function SuperAdminDashboard() {
                     <h1 className="text-3xl font-bold text-[#E6EDF3] tracking-wider">System Command Center</h1>
                     <p className="text-sm text-[#8B949E] mt-1">Oversee and manage all hospital network participants.</p>
                 </div>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
                     <div className="bg-[#161B22]/70 backdrop-blur-sm p-4 rounded-lg border border-gray-800 flex items-center gap-4">
-                        <div className="p-3 bg-green-500/20 rounded-full border border-green-500/30"><HospitalIcon className="text-green-400"/></div>
+                        <div className="p-3 bg-green-500/20 rounded-full border border-green-500/30"><HospitalIcon className="text-green-400" /></div>
                         <div>
                             <p className="text-sm text-[#8B949E]">Verified Hospitals</p>
                             <p className="text-2xl font-bold text-[#E6EDF3]">{verifiedHospitals.length}</p>
                         </div>
                     </div>
                     <div className="bg-[#161B22]/70 backdrop-blur-sm p-4 rounded-lg border border-gray-800 flex items-center gap-4">
-                        <div className="p-3 bg-cyan-500/20 rounded-full border border-cyan-500/30"><PendingIcon className="text-cyan-400"/></div>
+                        <div className="p-3 bg-cyan-500/20 rounded-full border border-cyan-500/30"><PendingIcon className="text-cyan-400" /></div>
                         <div>
                             <p className="text-sm text-[#8B949E]">Pending Requests</p>
                             <p className="text-2xl font-bold text-[#E6EDF3]">{pendingRequests.length}</p>
                         </div>
                     </div>
                     <div className="bg-[#161B22]/70 backdrop-blur-sm p-4 rounded-lg border border-gray-800 flex items-center gap-4">
-                         <div className="p-3 bg-purple-500/20 rounded-full border border-purple-500/30"><StatusIcon className="text-purple-400"/></div>
+                        <div className="p-3 bg-purple-500/20 rounded-full border border-purple-500/30"><StatusIcon className="text-purple-400" /></div>
                         <div>
                             <p className="text-sm text-[#8B949E]">System Status</p>
                             <p className="text-2xl font-bold text-green-400">Operational</p>
@@ -223,7 +288,7 @@ export default function SuperAdminDashboard() {
                         <span className="block sm:inline">{error}</span>
                     </div>
                 )}
-                
+
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div>
@@ -236,11 +301,12 @@ export default function SuperAdminDashboard() {
                                             <p className="text-sm text-[#8B949E] mt-2 font-mono break-words">Request ID: {req.requestId}</p>
                                             <p className="text-sm text-[#8B949E] font-mono break-words">Admin: {req.requesterAddress}</p>
                                             <div className="mt-4 grid grid-cols-2 gap-3">
-                                                <button onClick={() => handleVerify(req.requestId, req.requesterAddress)} disabled={actionStates[`verify_${req.requestId}`] || actionStates[`reject_${req.requestId}`]} className="flex items-center justify-center gap-2 bg-green-600/80 border border-green-500/50 text-white font-bold py-2 px-4 rounded-md hover:bg-green-500 focus:outline-none transition-all hover:scale-105 disabled:bg-gray-700 disabled:text-gray-500 disabled:border-gray-600 disabled:cursor-not-allowed">
+                                                {/* --- 4. UPDATE OnClick HANDLERS --- */}
+                                                <button onClick={() => openVerifyModal(req.requestId, req.requesterAddress, req.hospitalName)} disabled={actionStates[`verify_${req.requestId}`] || actionStates[`reject_${req.requestId}`]} className="flex items-center justify-center gap-2 bg-green-600/80 border border-green-500/50 text-white font-bold py-2 px-4 rounded-md hover:bg-green-500 focus:outline-none transition-all hover:scale-105 disabled:bg-gray-700 disabled:text-gray-500 disabled:border-gray-600 disabled:cursor-not-allowed">
                                                     {actionStates[`verify_${req.requestId}`] ? <><Spinner color="white" /> Verifying...</> : <><CheckIcon /> Verify</>}
                                                 </button>
-                                                <button onClick={() => handleReject(req.requestId)} disabled={actionStates[`verify_${req.requestId}`] || actionStates[`reject_${req.requestId}`]} className="flex items-center justify-center gap-2 bg-amber-600/80 border border-amber-500/50 text-white font-bold py-2 px-4 rounded-md hover:bg-amber-500 focus:outline-none transition-all hover:scale-105 disabled:bg-gray-700 disabled:text-gray-500 disabled:border-gray-600 disabled:cursor-not-allowed">
-                                                    {actionStates[`reject_${req.requestId}`] ? <><Spinner color="white"/> Rejecting...</> : <><RejectIcon /> Reject</>}
+                                                <button onClick={() => openRejectModal(req.requestId, req.hospitalName)} disabled={actionStates[`verify_${req.requestId}`] || actionStates[`reject_${req.requestId}`]} className="flex items-center justify-center gap-2 bg-amber-600/80 border border-amber-500/50 text-white font-bold py-2 px-4 rounded-md hover:bg-amber-500 focus:outline-none transition-all hover:scale-105 disabled:bg-gray-700 disabled:text-gray-500 disabled:border-gray-600 disabled:cursor-not-allowed">
+                                                    {actionStates[`reject_${req.requestId}`] ? <><Spinner color="white" /> Rejecting...</> : <><RejectIcon /> Reject</>}
                                                 </button>
                                             </div>
                                         </div>
@@ -262,20 +328,21 @@ export default function SuperAdminDashboard() {
                                             <h3 className="text-lg font-bold text-green-400">{hospital.name}</h3>
                                             <p className="text-sm text-[#8B949E] mt-2 font-mono break-words">Hospital ID: {hospital.hospitalId}</p>
                                             <p className="text-sm text-[#8B949E] font-mono break-words">Admin: {hospital.adminAddress}</p>
-                                            <button onClick={() => handleRevoke(hospital.hospitalId)} disabled={actionStates[`revoke_${hospital.hospitalId}`]} className="mt-4 w-full flex items-center justify-center gap-2 bg-red-600/80 border border-red-500/50 text-white font-bold py-2 px-4 rounded-md hover:bg-red-500 focus:outline-none transition-all hover:scale-105 disabled:bg-gray-700 disabled:text-gray-500 disabled:border-gray-600 disabled:cursor-not-allowed">
+                                            {/* --- 4. UPDATE OnClick HANDLERS --- */}
+                                            <button onClick={() => openRevokeModal(hospital.hospitalId, hospital.name)} disabled={actionStates[`revoke_${hospital.hospitalId}`]} className="mt-4 w-full flex items-center justify-center gap-2 bg-red-600/80 border border-red-500/50 text-white font-bold py-2 px-4 rounded-md hover:bg-red-500 focus:outline-none transition-all hover:scale-105 disabled:bg-gray-700 disabled:text-gray-500 disabled:border-gray-600 disabled:cursor-not-allowed">
                                                 {actionStates[`revoke_${hospital.hospitalId}`] ? <><Spinner color="white" /> Revoking...</> : <><RevokeIcon /> Revoke Access</>}
                                             </button>
                                         </div>
                                     ))}
                                 </div>
                             ) : (
-                            <div className="bg-[#161B22]/70 backdrop-blur-sm p-5 rounded-lg border border-gray-800 text-center">
+                                <div className="bg-[#161B22]/70 backdrop-blur-sm p-5 rounded-lg border border-gray-800 text-center">
                                     <p className="text-[#8B949E] italic">No hospitals have been verified yet.</p>
                                 </div>
                             )}
                         </div>
                     </div>
-                    
+
                     <div className="lg:col-span-1">
                         <h2 className="text-xl font-semibold text-[#E6EDF3] mb-4 border-b-2 border-purple-500/30 pb-2">Recent Activity</h2>
                         <div className="bg-[#161B22]/70 backdrop-blur-sm p-4 rounded-lg border border-gray-800 space-y-3 h-[calc(100%-44px)] overflow-y-auto">
@@ -288,6 +355,21 @@ export default function SuperAdminDashboard() {
                     </div>
                 </div>
             </div>
+
+            {/* --- 5. ADD MODAL JSX --- */}
+            <ConfirmationModal
+                isOpen={modalState.isOpen}
+                onClose={closeModal}
+                onConfirm={() => {
+                    modalState.onConfirm(); // Call the stored action
+                    // We don't close modal here, the action handlers (handleVerify etc.) will close it
+                }}
+                title={modalState.title}
+                message={modalState.message}
+                confirmText={modalState.confirmText}
+                confirmColor={modalState.confirmColor}
+                isLoading={modalState.isLoading}
+            />
         </div>
     );
 }
