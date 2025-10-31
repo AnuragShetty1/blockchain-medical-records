@@ -8,6 +8,46 @@ const AccessRequest = require('../../models/AccessRequest');
 const AccessGrant = require('../../models/AccessGrant');
 const logger = require('../../utils/logger');
 
+// [NEW] Import all sponsored functions from ethersService
+const ethersService = require('../../services/ethersService');
+// [NEW] Import ethers for signature verification (as discussed for savePublicKey)
+const { ethers } = require('ethers');
+// [NEW] Import jwt for authentication middleware
+const jwt = require('jsonwebtoken');
+const config = require('../../config');
+
+// --- [NEW] AUTHENTICATION MIDDLEWARE ---
+/**
+ * @dev This middleware is the "guarantee" we discussed.
+ * It protects our new sponsored endpoints by verifying the user's JWT.
+ * It adds `req.user` (containing their wallet address) to the request,
+ * which we use as the trusted `userAddress` for all sponsored calls.
+ */
+const authenticate = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ success: false, message: 'Authentication token is required.' });
+    }
+    
+    const token = authHeader.split(' ')[1];
+    if (!token) {
+        return res.status(401).json({ success: false, message: 'Authentication token is missing.' });
+    }
+
+    try {
+        const decoded = jwt.verify(token, config.jwtSecret);
+        // Attach user info (especially the address) to the request object
+        req.user = decoded; 
+        next();
+    } catch (error) {
+        logger.error(`Invalid JWT token: ${error.message}`);
+        return res.status(403).json({ success: false, message: 'Invalid or expired token.' });
+    }
+};
+
+// --- [UNCHANGED] EXISTING DATABASE/INDEXER ROUTES ---
+// All routes below are untouched and will continue to function as-is.
+
 /**
  * @route   GET /api/users/status/:address
  * @desc    Check the comprehensive status of a given wallet address.
@@ -161,19 +201,7 @@ router.post('/reset-hospital-request', async (req, res, next) => {
         if (!address) {
             return res.status(400).json({ success: false, message: 'User address is required.' });
         }
-
-        // --- MISTAKE ---
-        // The original logic only checked for a rejected `RegistrationRequest` (for hospitals), but not
-        // for a rejected `User` (for professionals). This caused an error when a rejected professional
-        // tried to re-register because their rejection was stored in a different data model.
-
-        // --- FIX ---
-        // The logic is now updated to handle both scenarios.
-        // First, it attempts to find and reset a rejected professional by updating their `professionalStatus`
-        // in the User model. If that fails, it then attempts to find and delete a rejected hospital
-        // request from the RegistrationRequest model. This makes the endpoint robust for both workflows.
-
-        // Scenario 1: Check for and reset a rejected professional user.
+        
         const rejectedUser = await User.findOneAndUpdate(
             { address: lowerCaseAddress, professionalStatus: 'rejected' },
             { $set: { professionalStatus: 'unregistered', requestedHospitalId: null } },
@@ -185,7 +213,6 @@ router.post('/reset-hospital-request', async (req, res, next) => {
             return res.status(200).json({ success: true, message: 'Request status has been reset.' });
         }
 
-        // Scenario 2: If no rejected user was found, check for a rejected hospital registration request.
         const result = await RegistrationRequest.deleteOne({
             requesterAddress: lowerCaseAddress,
             status: 'rejected'
@@ -196,7 +223,6 @@ router.post('/reset-hospital-request', async (req, res, next) => {
             return res.status(200).json({ success: true, message: 'Request status has been reset.' });
         }
         
-        // If neither was found, the request is invalid.
         logger.warn(`No rejected professional or hospital request found for address: ${lowerCaseAddress} to reset.`);
         return res.status(404).json({ success: false, message: 'No rejected request found to reset.' });
 
@@ -559,5 +585,319 @@ router.post('/records/details', async (req, res, next) => {
 });
 
 
-module.exports = router;
+// --- [NEW] SPONSORED ON-CHAIN ROUTES ---
+// All routes below are new. They are protected by our 'authenticate'
+// middleware and call the ethersService to perform sponsored transactions.
+// The user's address is securely taken from `req.user.address` (from the JWT).
 
+// A helper function to handle common transaction responses
+const handleTransaction = (promise, res, next) => {
+    promise
+        .then(tx => {
+            // Don't wait for tx.wait() here, as it can take 15-30s.
+            // The indexer will pick up the transaction.
+            // Send back the hash immediately for frontend UI.
+            res.status(202).json({ success: true, message: 'Transaction submitted.', transactionHash: tx.hash });
+        })
+        .catch(error => {
+            logger.error(`Sponsored transaction failed: ${error.message}`);
+            next(error); // Pass to the global error handler
+        });
+};
+
+/**
+ * @route   POST /api/users/sponsored/register-user
+ * @desc    Sponsors the 'registerUser' transaction.
+ * @access  Private (Authenticated User)
+ */
+router.post('/sponsored/register-user', authenticate, (req, res, next) => {
+    const { name, role } = req.body;
+    // We use req.user.address from the auth middleware, NOT req.body.address
+    const userAddress = req.user.address; 
+
+    if (!name || !role) {
+        return res.status(400).json({ success: false, message: 'Missing required fields: name, role' });
+    }
+    
+    handleTransaction(
+        ethersService.registerUser(userAddress, name, role),
+        res,
+        next
+    );
+});
+
+/**
+ * @route   POST /api/users/sponsored/save-public-key
+ * @desc    Sponsors the 'savePublicKey' transaction.
+ * @access  Private (Authenticated User)
+ * @body    { string publicKey, string signature }
+ */
+router.post('/sponsored/save-public-key', authenticate, (req, res, next) => {
+    const { publicKey, signature } = req.body;
+    const userAddress = req.user.address;
+
+    if (!publicKey || !signature) {
+        return res.status(400).json({ success: false, message: 'Missing required fields: publicKey, signature' });
+    }
+
+    // --- Security Check (as discussed) ---
+    // We verify the gasless signature to prove the user *owns* the private key
+    // associated with the public key they are trying to save.
+    const message = `Save my public key: ${publicKey}`;
+    let recoveredAddress;
+    try {
+        recoveredAddress = ethers.verifyMessage(message, signature);
+    } catch (error) {
+        logger.warn(`Invalid signature for savePublicKey: ${error.message}`);
+        return res.status(400).json({ success: false, message: 'Invalid signature provided.' });
+    }
+
+    if (recoveredAddress.toLowerCase() !== userAddress.toLowerCase()) {
+        logger.warn(`Signature address (${recoveredAddress}) does not match authenticated user (${userAddress}).`);
+        return res.status(403).json({ success: false, message: 'Signature does not match authenticated user.' });
+    }
+    // --- End Security Check ---
+
+    handleTransaction(
+        ethersService.savePublicKey(userAddress, publicKey),
+        res,
+        next
+    );
+});
+
+/**
+ * @route   POST /api/users/sponsored/update-profile
+ * @desc    Sponsors the 'updateUserProfile' transaction.
+ * @access  Private (Authenticated User)
+ */
+router.post('/sponsored/update-profile', authenticate, (req, res, next) => {
+    const { name, contactInfo, profileMetadataURI } = req.body;
+    const userAddress = req.user.address;
+
+    if (name === undefined || contactInfo === undefined || profileMetadataURI === undefined) {
+        return res.status(400).json({ success: false, message: 'Missing fields. Must provide name, contactInfo, and profileMetadataURI.' });
+    }
+
+    handleTransaction(
+        ethersService.updateUserProfile(userAddress, name, contactInfo, profileMetadataURI),
+        res,
+        next
+    );
+});
+
+/**
+ * @route   POST /api/users/sponsored/request-hospital-registration
+ * @desc    Sponsors the 'requestRegistration' (for a hospital) transaction.
+ * @access  Private (Authenticated User)
+ */
+router.post('/sponsored/request-hospital-registration', authenticate, (req, res, next) => {
+    const { hospitalName } = req.body;
+    const userAddress = req.user.address; // The requester
+
+    if (!hospitalName) {
+        return res.status(400).json({ success: false, message: 'Missing required field: hospitalName' });
+    }
+
+    handleTransaction(
+        ethersService.requestRegistration(userAddress, hospitalName),
+        res,
+        next
+    );
+});
+
+/**
+ * @route   POST /api/users/sponsored/grant-access
+ * @desc    Sponsors the 'grantMultipleRecordAccess' transaction.
+ * @access  Private (Patient only)
+ */
+router.post('/sponsored/grant-access', authenticate, (req, res, next) => {
+    const { recordIds, grantee, durationInDays, encryptedDeks } = req.body;
+    const patientAddress = req.user.address; // The patient is the one granting
+
+    if (!recordIds || !grantee || !durationInDays || !encryptedDeks) {
+        return res.status(400).json({ success: false, message: 'Missing required fields: recordIds, grantee, durationInDays, encryptedDeks' });
+    }
+    if (recordIds.length !== encryptedDeks.length) {
+        return res.status(400).json({ success: false, message: 'recordIds and encryptedDeks arrays must have the same length.' });
+    }
+
+    handleTransaction(
+        ethersService.grantMultipleRecordAccess(patientAddress, recordIds, grantee, durationInDays, encryptedDeks),
+        res,
+        next
+    );
+});
+
+/**
+ * @route   POST /api/users/sponsored/revoke-access
+ * @desc    Sponsors the 'revokeMultipleRecordAccess' transaction.
+ * @access  Private (Patient only)
+ */
+router.post('/sponsored/revoke-access', authenticate, (req, res, next) => {
+    const { professional, recordIds } = req.body;
+    const patientAddress = req.user.address; // The patient is the one revoking
+
+    if (!professional || !recordIds) {
+        return res.status(400).json({ success: false, message: 'Missing required fields: professional, recordIds' });
+    }
+
+    handleTransaction(
+        ethersService.revokeMultipleRecordAccess(patientAddress, professional, recordIds),
+        res,
+        next
+    );
+});
+
+/**
+ * @route   POST /api/users/sponsored/request-access-insurance
+ * @desc    Sponsors an insurance provider's 'requestAccess' transaction.
+ * @access  Private (InsuranceProvider only)
+ */
+router.post('/sponsored/request-access-insurance', authenticate, (req, res, next) => {
+    const { patientAddress, claimId } = req.body;
+    const providerAddress = req.user.address; // The insurance provider
+
+    if (!patientAddress || !claimId) {
+        return res.status(400).json({ success: false, message: 'Missing required fields: patientAddress, claimId' });
+    }
+
+    handleTransaction(
+        ethersService.requestAccess(providerAddress, patientAddress, claimId),
+        res,
+        next
+    );
+});
+
+/**
+ * @route   POST /api/users/sponsored/approve-request-insurance
+ * @desc    Sponsors a patient's 'approveRequest' transaction.
+ * @access  Private (Patient only)
+ */
+router.post('/sponsored/approve-request-insurance', authenticate, (req, res, next) => {
+    const { requestId, durationInDays } = req.body;
+    const patientAddress = req.user.address; // The patient
+
+    if (requestId === undefined || !durationInDays) {
+        return res.status(400).json({ success: false, message: 'Missing required fields: requestId, durationInDays' });
+    }
+
+    handleTransaction(
+        ethersService.approveRequest(patientAddress, requestId, durationInDays),
+        res,
+        next
+    );
+});
+
+/**
+ * @route   POST /api/users/sponsored/request-access-professional
+ * @desc    Sponsors a professional's 'requestRecordAccess' transaction.
+ * @access  Private (Professional only)
+ */
+router.post('/sponsored/request-access-professional', authenticate, (req, res, next) => {
+    const { patientAddress, recordIds } = req.body;
+    const professionalAddress = req.user.address; // The professional
+
+    if (!patientAddress || !recordIds) {
+        return res.status(400).json({ success: false, message: 'Missing required fields: patientAddress, recordIds' });
+    }
+
+    handleTransaction(
+        ethersService.requestRecordAccess(professionalAddress, patientAddress, recordIds),
+        res,
+        next
+    );
+});
+
+/**
+ * @route   POST /api/users/sponsored/add-self-record
+ * @desc    Sponsors a patient's 'addSelfUploadedRecord' transaction.
+ * @access  Private (Patient only)
+ */
+router.post('/sponsored/add-self-record', authenticate, (req, res, next) => {
+    const { ipfsHash, title, category } = req.body;
+    const patientAddress = req.user.address; // The patient
+
+    if (!ipfsHash || !title || !category) {
+        return res.status(400).json({ success: false, message: 'Missing required fields: ipfsHash, title, category' });
+    }
+
+    handleTransaction(
+        ethersService.addSelfUploadedRecord(patientAddress, ipfsHash, title, category),
+        res,
+        next
+    );
+});
+
+/**
+ * @route   POST /api/users/sponsored/add-verified-record
+ * @desc    Sponsors a professional's 'addVerifiedRecord' transaction.
+ * @access  Private (Professional only)
+ */
+router.post('/sponsored/add-verified-record', authenticate, (req, res, next) => {
+    const { patient, ipfsHash, title, category, encryptedKeyForPatient, encryptedKeyForHospital } = req.body;
+    const professionalAddress = req.user.address; // The professional
+
+    if (!patient || !ipfsHash || !title || !category || !encryptedKeyForPatient || !encryptedKeyForHospital) {
+        return res.status(400).json({ success: false, message: 'Missing one or more required fields.' });
+    }
+
+    handleTransaction(
+        ethersService.addVerifiedRecord(professionalAddress, patient, ipfsHash, title, category, encryptedKeyForPatient, encryptedKeyForHospital),
+        res,
+        next
+    );
+});
+
+/**
+ * @route   POST /api/users/sponsored/add-self-record-batch
+ * @desc    Sponsors a patient's 'addSelfUploadedRecordsBatch' transaction.
+ * @access  Private (Patient only)
+ */
+router.post('/sponsored/add-self-record-batch', authenticate, (req, res, next) => {
+    const { ipfsHashes, titles, categories } = req.body;
+    const patientAddress = req.user.address; // The patient
+
+    if (!ipfsHashes || !titles || !categories) {
+        return res.status(400).json({ success: false, message: 'Missing required fields: ipfsHashes, titles, categories' });
+    }
+    if (ipfsHashes.length !== titles.length || ipfsHashes.length !== categories.length) {
+        return res.status(400).json({ success: false, message: 'All arrays must have the same length.' });
+    }
+
+    handleTransaction(
+        ethersService.addSelfUploadedRecordsBatch(patientAddress, ipfsHashes, titles, categories),
+        res,
+        next
+    );
+});
+
+/**
+ * @route   POST /api/users/sponsored/add-verified-record-batch
+ * @desc    Sponsors a professional's 'addVerifiedRecordsBatch' transaction.
+ * @access  Private (Professional only)
+ */
+router.post('/sponsored/add-verified-record-batch', authenticate, (req, res, next) => {
+    const { patient, ipfsHashes, titles, categories, encryptedKeysForPatient, encryptedKeysForHospital } = req.body;
+    const professionalAddress = req.user.address; // The professional
+
+    if (!patient || !ipfsHashes || !titles || !categories || !encryptedKeysForPatient || !encryptedKeysForHospital) {
+        return res.status(400).json({ success: false, message: 'Missing one or more required fields.' });
+    }
+    if (
+        ipfsHashes.length !== titles.length ||
+        ipfsHashes.length !== categories.length ||
+        ipfsHashes.length !== encryptedKeysForPatient.length ||
+        ipfsHashes.length !== encryptedKeysForHospital.length
+    ) {
+        return res.status(400).json({ success: false, message: 'All arrays must have the same length.' });
+    }
+
+    handleTransaction(
+        ethersService.addVerifiedRecordsBatch(professionalAddress, patient, ipfsHashes, titles, categories, encryptedKeysForPatient, encryptedKeysForHospital),
+        res,
+        next
+    );
+});
+
+
+module.exports = router;

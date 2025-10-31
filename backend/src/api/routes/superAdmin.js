@@ -12,10 +12,10 @@ const logger = require('../../utils/logger');
  */
 router.get('/requests', async (req, res, next) => {
     try {
-        const pendingRequests = await RegistrationRequest.find({ 
-            status: { $in: ['pending_hospital', 'verifying'] } 
+        const pendingRequests = await RegistrationRequest.find({
+            status: { $in: ['pending_hospital', 'verifying'] }
         }).sort({ createdAt: -1 });
-        
+
         res.json({ success: true, data: pendingRequests });
     } catch (error) {
         logger.error('Error fetching pending requests:', error);
@@ -30,7 +30,7 @@ router.get('/requests', async (req, res, next) => {
  */
 router.get('/hospitals', async (req, res, next) => {
     try {
-        const verifiedHospitals = await Hospital.find({ 
+        const verifiedHospitals = await Hospital.find({
             status: 'active'
         }).sort({ createdAt: -1 });
         res.json({ success: true, data: verifiedHospitals });
@@ -77,7 +77,7 @@ router.post('/verify-hospital', async (req, res, next) => {
 
     } catch (error) {
         logger.error(`On-chain verification failed for request ID ${numericRequestId}:`, error);
-        
+
         await RegistrationRequest.findOneAndUpdate(
             { requestId: numericRequestId },
             { $set: { status: 'failed' } }
@@ -136,7 +136,6 @@ router.post('/revoke-hospital', async (req, res, next) => {
     }
 });
 
-// --- NEW ENDPOINT ---
 /**
  * @route   POST /api/super-admin/reject-hospital
  * @desc    Rejects a pending hospital registration request.
@@ -153,14 +152,12 @@ router.post('/reject-hospital', async (req, res, next) => {
     try {
         logger.info(`Rejection process started for request ID: ${numericRequestId}`);
 
-        // Find the request that is specifically in the 'pending_hospital' state.
         const request = await RegistrationRequest.findOneAndUpdate(
             { requestId: numericRequestId, status: 'pending_hospital' },
             { $set: { status: 'rejected' } },
             { new: true }
         );
 
-        // If no request is found, it means it was not in the correct state (e.g., already verified or rejected).
         if (!request) {
             logger.warn(`Request ID ${numericRequestId} not found or not in a pending state.`);
             return res.status(404).json({ success: false, message: 'Request not found or it is not in a pending state.' });
@@ -172,6 +169,67 @@ router.post('/reject-hospital', async (req, res, next) => {
     } catch (error) {
         logger.error(`Failed to reject request ID ${numericRequestId}:`, error);
         next(error);
+    }
+});
+
+
+// --- [NEW] SPONSOR MANAGEMENT ROUTES ---
+
+/**
+ * @route   POST /api/super-admin/grant-sponsor
+ * @desc    Grants the sponsor role to a wallet address.
+ * @access  Public (for now)
+ */
+router.post('/grant-sponsor', async (req, res, next) => {
+    const { sponsorAddress } = req.body;
+    if (!sponsorAddress || !ethersService.ethers.isAddress(sponsorAddress)) {
+        return res.status(400).json({ success: false, message: 'A valid sponsor wallet address is required.' });
+    }
+
+    try {
+        logger.info(`Attempting to grant sponsor role to: ${sponsorAddress}`);
+
+        const tx = await ethersService.grantSponsorRole(sponsorAddress);
+        logger.info(`Grant sponsor transaction sent. Hash: ${tx.hash}. Waiting for confirmation...`);
+
+        await tx.wait(1);
+        logger.info(`Transaction confirmed. Sponsor role granted to ${sponsorAddress}.`);
+
+        res.json({ success: true, message: `Sponsor role successfully granted to ${sponsorAddress}.` });
+
+    } catch (error) {
+        logger.error(`Failed to grant sponsor role to ${sponsorAddress}:`, error);
+        const reason = error.reason || 'An error occurred during the blockchain transaction.';
+        res.status(500).json({ success: false, message: reason });
+    }
+});
+
+/**
+ * @route   POST /api/super-admin/revoke-sponsor
+ * @desc    Revokes the sponsor role from a wallet address.
+ * @access  Public (for now)
+ */
+router.post('/revoke-sponsor', async (req, res, next) => {
+    const { sponsorAddress } = req.body;
+    if (!sponsorAddress || !ethersService.ethers.isAddress(sponsorAddress)) {
+        return res.status(400).json({ success: false, message: 'A valid sponsor wallet address is required.' });
+    }
+
+    try {
+        logger.info(`Attempting to revoke sponsor role from: ${sponsorAddress}`);
+
+        const tx = await ethersService.revokeSponsorRole(sponsorAddress);
+        logger.info(`Revoke sponsor transaction sent. Hash: ${tx.hash}. Waiting for confirmation...`);
+
+        await tx.wait(1);
+        logger.info(`Transaction confirmed. Sponsor role revoked from ${sponsorAddress}.`);
+
+        res.json({ success: true, message: `Sponsor role successfully revoked from ${sponsorAddress}.` });
+
+    } catch (error) { // [FIXED] Removed the typo '_'
+        logger.error(`Failed to revoke sponsor role from ${sponsorAddress}:`, error);
+        const reason = error.reason || 'An error occurred during the blockchain transaction.';
+        res.status(500).json({ success: false, message: reason });
     }
 });
 
