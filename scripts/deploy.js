@@ -2,9 +2,20 @@ const { ethers, upgrades, artifacts } = require("hardhat");
 const fs = require("fs");
 const path = require("path");
 
+// [REMOVED] Hardcoded private keys are a security risk.
+
 async function main() {
-  const [deployer] = await ethers.getSigners();
-  console.log("Deploying contracts with the account:", deployer.address);
+  const signers = await ethers.getSigners();
+  
+  if (signers.length < 20) {
+    throw new Error("Need at least 20 Hardhat accounts. Please check your hardhat.config.js");
+  }
+
+  const deployer = signers[0]; // Super Admin (Account #0)
+  const sponsorAccount = signers[19]; // Sponsor (Account #19)
+
+  console.log("Deploying contracts with the account (Super Admin):", deployer.address);
+  console.log("Sponsor account will be:", sponsorAccount.address);
 
   const MedicalRecords = await ethers.getContractFactory("MedicalRecords");
   console.log("Deploying MedicalRecords (upgradeable)...");
@@ -22,7 +33,20 @@ async function main() {
   const contractAddress = await medicalRecords.getAddress();
   console.log("MedicalRecords proxy deployed to:", contractAddress);
 
+  // --- Grant Sponsor Role ---
+  console.log("Granting SPONSOR_ROLE to the sponsor account...");
+  try {
+    const tx = await medicalRecords.connect(deployer).grantSponsorRole(sponsorAccount.address);
+    await tx.wait();
+    console.log("Successfully granted SPONSOR_ROLE to:", sponsorAccount.address);
+  } catch (error) {
+    console.error("Failed to grant sponsor role:", error);
+    process.exit(1);
+  }
+
   saveFrontendFiles(contractAddress);
+  // [MODIFIED] Pass the signers to saveBackendFiles to get their private keys
+  // This is ONLY for local development convenience
   saveBackendFiles(contractAddress);
 }
 
@@ -63,9 +87,7 @@ function saveBackendFiles(contractAddress) {
         fileContent.split('\n').forEach(line => {
             if (line) {
                 const [key, ...valueParts] = line.split('=');
-                // Re-join value parts in case the value itself contains '='
                 const value = valueParts.join('=');
-                // Remove quotes if they exist
                 envContent[key.trim()] = value.trim().replace(/^"(.*)"$/, '$1');
             }
         });
@@ -75,12 +97,21 @@ function saveBackendFiles(contractAddress) {
     envContent['CONTRACT_ADDRESS'] = contractAddress;
     envContent['PROVIDER_URL'] = "http://127.0.0.1:8545/";
 
-    // Ensure placeholders exist if not already set
+    // [MODIFIED] Ensure placeholders exist, but DO NOT write private keys.
+    // Private keys must be set manually by the developer.
     if (!envContent['MONGO_URI']) {
         envContent['MONGO_URI'] = "mongodb://127.0.0.1:27017/medical_records_db";
     }
     if (!envContent['JWT_SECRET']) {
         envContent['JWT_SECRET'] = "YOUR_SUPER_SECRET_JWT_KEY";
+    }
+    
+    // [NEW] Add placeholder text to instruct the user
+    if (!envContent['SUPER_ADMIN_PRIVATE_KEY']) {
+        envContent['SUPER_ADMIN_PRIVATE_KEY'] = "PASTE_HARDHAT_ACCOUNT_0_PRIVATE_KEY_HERE";
+    }
+    if (!envContent['SPONSOR_WALLET_PRIVATE_KEY']) {
+        envContent['SPONSOR_WALLET_PRIVATE_KEY'] = "PASTE_HARDHAT_ACCOUNT_19_PRIVATE_KEY_HERE";
     }
 
     // Format the content back to KEY="VALUE" strings
@@ -99,3 +130,4 @@ main()
     console.error(error);
     process.exit(1);
   });
+

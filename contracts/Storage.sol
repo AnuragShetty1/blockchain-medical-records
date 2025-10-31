@@ -88,5 +88,7 @@ abstract contract Storage {
     mapping(address => uint256) public userToHospital; // userAddress => hospitalId
     
     mapping(address => uint256) public professionalToHospitalId;
-}
 
+    // [NEW] Mapping to grant sponsor role for gas-less transactions
+    mapping(address => bool) public isSponsor;
+}

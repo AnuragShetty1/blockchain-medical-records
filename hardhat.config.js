@@ -10,6 +10,9 @@ module.exports = {
         enabled: true,
         runs: 200, // Standard value for reducing contract size
       },
+      // [NEW] Enable the 'viaIR' pipeline to solve "Stack too deep" errors.
+      // This is the recommended fix from the compiler.
+      viaIR: true,
     },
   },
   networks: {
@@ -17,9 +20,8 @@ module.exports = {
       chainId: 31337,
     },
     localhost: {
-      url: "http://127.0.0.1:8545", // Corrected the IP address from 12.0.0.1
+      url: "http://127.0.0.1:8545",
       chainId: 31337,
     },
   },
 };
-

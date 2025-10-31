@@ -25,6 +25,7 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
     error UserNotInHospital();
     error NotAuthorized();
     error HospitalNotVerified();
+    error NotSponsor(); // [NEW] For sponsor-only functions
 
     // --- EVENTS ---
     event UserRegistered(address indexed userAddress, string name, Role role);
@@ -36,68 +37,117 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
     event HospitalRevoked(uint256 indexed hospitalId);
     event RoleAssigned(address indexed user, Role role, uint256 indexed hospitalId);
     event RoleRevoked(address indexed user, Role role, uint256 indexed hospitalId);
+    event SponsorGranted(address indexed sponsor); // [NEW]
+    event SponsorRevoked(address indexed sponsor); // [NEW]
 
     // Internal initializer to set up the parent contract.
     function __Roles_init(address initialOwner) internal onlyInitializing {
         __Ownable_init(initialOwner);
     }
 
-    // --- FUNCTIONS ---
+    // --- MODIFIERS ---
+    
+    /**
+     * @dev Throws if called by any account other than a designated sponsor.
+     */
+    modifier onlySponsor() {
+        if (!isSponsor[msg.sender]) { revert NotSponsor(); }
+        _;
+    }
 
-    function registerUser(string memory _name, Role _role) public {
-        if (users[msg.sender].walletAddress != address(0)) { revert AlreadyRegistered(); }
+    // --- SPONSOR ROLE MANAGEMENT (SUPER ADMIN ONLY) ---
+
+    /**
+     * @dev Grants sponsor role to an account.
+     * Callable only by the Super Admin (owner).
+     */
+    function grantSponsorRole(address _sponsor) public onlyOwner {
+        isSponsor[_sponsor] = true;
+        emit SponsorGranted(_sponsor);
+    }
+
+    /**
+     * @dev Revokes sponsor role from an account.
+     * Callable only by the Super Admin (owner).
+     */
+    function revokeSponsorRole(address _sponsor) public onlyOwner {
+        isSponsor[_sponsor] = false;
+        emit SponsorRevoked(_sponsor);
+    }
+
+    // --- USER FUNCTIONS (SPONSORED) ---
+
+    /**
+     * @dev Registers a new user.
+     * Callable only by a Sponsor on behalf of a user.
+     */
+    function registerUser(address _userAddress, string memory _name, Role _role) public onlySponsor {
+        if (users[_userAddress].walletAddress != address(0)) { revert AlreadyRegistered(); }
         if (_role == Role.HospitalAdmin || _role == Role.SuperAdmin) { revert CannotRegisterAsAdmin(); }
 
-        users[msg.sender] = User({
-            walletAddress: msg.sender,
+        users[_userAddress] = User({
+            walletAddress: _userAddress,
             name: _name,
             role: _role,
             isVerified: false,
             publicKey: ""
         });
 
-        userProfiles[msg.sender] = UserProfile({
+        userProfiles[_userAddress] = UserProfile({
             name: _name,
             contactInfo: "",
             profileMetadataURI: ""
         });
 
-        emit UserRegistered(msg.sender, _name, _role);
+        emit UserRegistered(_userAddress, _name, _role);
     }
 
-    function savePublicKey(string memory _publicKey) public {
-        if (users[msg.sender].walletAddress == address(0)) { revert NotRegistered(); }
-        if (bytes(users[msg.sender].publicKey).length > 0) { revert PublicKeyAlreadySet(); }
+    /**
+     * @dev Saves a user's public key.
+     * Callable only by a Sponsor on behalf of a user.
+     */
+    function savePublicKey(address _userAddress, string memory _publicKey) public onlySponsor {
+        if (users[_userAddress].walletAddress == address(0)) { revert NotRegistered(); }
+        if (bytes(users[_userAddress].publicKey).length > 0) { revert PublicKeyAlreadySet(); }
 
-        users[msg.sender].publicKey = _publicKey;
-        emit PublicKeySaved(msg.sender);
+        users[_userAddress].publicKey = _publicKey;
+        emit PublicKeySaved(_userAddress);
     }
 
-    function updateUserProfile(string calldata _name, string calldata _contactInfo, string calldata _profileMetadataURI) public {
-        if (users[msg.sender].walletAddress == address(0)) { revert NotRegistered(); }
+    /**
+     * @dev Updates a user's profile information.
+     * Callable only by a Sponsor on behalf of a user.
+     */
+    function updateUserProfile(address _userAddress, string calldata _name, string calldata _contactInfo, string calldata _profileMetadataURI) public onlySponsor {
+        if (users[_userAddress].walletAddress == address(0)) { revert NotRegistered(); }
 
-        userProfiles[msg.sender].name = _name;
-        userProfiles[msg.sender].contactInfo = _contactInfo;
-        userProfiles[msg.sender].profileMetadataURI = _profileMetadataURI;
-        users[msg.sender].name = _name;
+        userProfiles[_userAddress].name = _name;
+        userProfiles[_userAddress].contactInfo = _contactInfo;
+        userProfiles[_userAddress].profileMetadataURI = _profileMetadataURI;
+        users[_userAddress].name = _name;
 
-        emit ProfileUpdated(msg.sender, _name, _contactInfo, _profileMetadataURI);
+        emit ProfileUpdated(_userAddress, _name, _contactInfo, _profileMetadataURI);
     }
 
 
     // --- Hospital Management Functions ---
 
-    function requestRegistration(string memory hospitalName) public {
+    /**
+     * @dev Submits a request to register a new hospital.
+     * Callable only by a Sponsor on behalf of a user.
+     */
+    function requestRegistration(address _requesterAddress, string memory hospitalName) public onlySponsor {
         uint256 id = hospitalIdCounter++;
         registrationRequests[id] = RegistrationRequest({
             hospitalId: id,
             name: hospitalName,
-            requesterAddress: msg.sender,
+            requesterAddress: _requesterAddress,
             status: RequestStatus.Pending
         });
-        emit RegistrationRequested(id, hospitalName, msg.sender);
+        emit RegistrationRequested(id, hospitalName, _requesterAddress);
     }
 
+    // [UNCHANGED] Admin function, not sponsored
     function verifyHospital(uint256 hospitalId, address adminAddress) public onlyOwner {
         if (registrationRequests[hospitalId].status != RequestStatus.Pending) {
             revert RequestNotFoundOrAlreadyHandled();
@@ -127,6 +177,7 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
         emit UserRegistered(adminAddress, "Admin", Role.HospitalAdmin);
     }
 
+    // [UNCHANGED] Admin function, not sponsored
     function revokeHospital(uint256 hospitalId) public onlyOwner {
         if (!hospitals[hospitalId].isVerified) {
             revert HospitalNotVerified();
@@ -136,6 +187,7 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
         emit HospitalRevoked(hospitalId);
     }
 
+    // [UNCHANGED] Admin function, not sponsored
     // Allows the contract owner (Super Admin) OR the affiliated Hospital Admin to assign a role.
     function assignRole(address user, Role role, uint256 hospitalId) public {
         // If the sender is not the contract owner (Super Admin), enforce the Hospital Admin checks.
@@ -159,6 +211,7 @@ contract Roles is Initializable, OwnableUpgradeable, Storage {
         emit UserVerified(msg.sender, user);
     }
 
+    // [UNCHANGED] Admin function, not sponsored
     // Allows the contract owner (Super Admin) OR the affiliated Hospital Admin to revoke a role.
     function revokeRole(address user, Role role, uint256 hospitalId) public {
         // If the sender is not the contract owner (Super Admin), enforce the Hospital Admin checks.

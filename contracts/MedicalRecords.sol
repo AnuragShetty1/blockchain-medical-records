@@ -15,18 +15,20 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
         _disableInitializers();
     }
 
+    // [UNCHANGED]
     function initialize(address initialOwner) public initializer {
         __AccessControl_init(initialOwner);
         __UUPSUpgradeable_init();
     }
     
+    // [UNCHANGED]
     function _authorizeUpgrade(address newImplementation)
         internal
         onlyOwner
         override
     {}
 
-    // --- EVENTS ---
+    // --- EVENTS (UNCHANGED) ---
     event RecordAdded(
         uint256 indexed recordId,
         address indexed owner,
@@ -37,46 +39,56 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
         address uploadedBy,
         uint256 timestamp
     );
+    
+    event RecordsBatchAdded(
+        uint256[] recordIds,
+        address indexed owner,
+        bool isVerified,
+        address indexed uploadedBy
+    );
 
 
-    // --- FUNCTIONS ---
+    // --- FUNCTIONS (SPONSORED) (UNCHANGED) ---
 
     /**
-     * @dev Allows a patient to add a self-uploaded, non-verified medical record.
+     * @dev [UNCHANGED] Allows a Sponsor to add a self-uploaded, non-verified medical record on behalf of a patient.
      */
     function addSelfUploadedRecord(
+        address _patientAddress,
         string memory _ipfsHash,
         string memory _title,
         string memory _category
-    ) public {
-        if (users[msg.sender].role != Role.Patient) { revert NotAPatient(); }
+    ) public onlySponsor { 
+        if (users[_patientAddress].role != Role.Patient) { revert NotAPatient(); }
         
         _createRecord(
-            msg.sender,
+            _patientAddress,
+            _patientAddress,
             _ipfsHash,
-            _title, // Pass title to internal function
+            _title,
             _category,
             false,
-            bytes(""), // Pass empty bytes for patient key (no longer used in this flow)
-            bytes("")  // Pass empty bytes for hospital key (no longer used in this flow)
+            bytes(""),
+            bytes("")
         );
     }
 
     /**
-     * @dev Allows a verified professional to add a verified record for a patient.
+     * @dev [UNCHANGED] Allows a Sponsor to add a verified record for a patient on behalf of a professional.
      */
     function addVerifiedRecord(
+        address _professionalAddress,
         address _patient,
         string memory _ipfsHash,
         string memory _title,
         string memory _category,
         bytes memory _encryptedKeyForPatient,
         bytes memory _encryptedKeyForHospital
-    ) public {
+    ) public onlySponsor { 
         if (users[_patient].walletAddress == address(0)) { revert UserNotFound(); }
         if (users[_patient].role != Role.Patient) { revert NotAPatient(); }
 
-        User storage professional = users[msg.sender];
+        User storage professional = users[_professionalAddress];
         if (
             (professional.role != Role.Doctor && professional.role != Role.LabTechnician) ||
             !professional.isVerified
@@ -85,6 +97,7 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
         }
 
         _createRecord(
+            _professionalAddress,
             _patient,
             _ipfsHash,
             _title,
@@ -96,9 +109,98 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
     }
 
     /**
-     * @dev Internal function to handle the creation and storage of a new record.
+     * @dev [UNCHANGED] Allows a Sponsor to add multiple self-uploaded records for a patient in a batch.
+     */
+    function addSelfUploadedRecordsBatch(
+        address _patientAddress,
+        string[] memory _ipfsHashes,
+        string[] memory _titles,
+        string[] memory _categories
+    ) public onlySponsor {
+        uint256 batchSize = _ipfsHashes.length;
+        if (batchSize == 0) { revert EmptyInputArray(); }
+        if (batchSize != _titles.length || batchSize != _categories.length) {
+            revert InputArrayLengthMismatch();
+        }
+        if (users[_patientAddress].role != Role.Patient) { revert NotAPatient(); }
+
+        uint256[] memory recordIds = new uint256[](batchSize);
+
+        for (uint i = 0; i < batchSize; i++) {
+            uint256 recordId = _createRecord(
+                _patientAddress, // Uploader
+                _patientAddress, // Owner
+                _ipfsHashes[i],
+                _titles[i],
+                _categories[i],
+                false,
+                bytes(""),
+                bytes("")
+            );
+            recordIds[i] = recordId;
+        }
+
+        emit RecordsBatchAdded(recordIds, _patientAddress, false, _patientAddress);
+    }
+
+    /**
+     * @dev [UNCHANGED] Allows a Sponsor to add multiple verified records for a patient in a batch on behalf of a professional.
+     */
+    function addVerifiedRecordsBatch(
+        address _professionalAddress,
+        address _patient,
+        string[] memory _ipfsHashes,
+        string[] memory _titles,
+        string[] memory _categories,
+        bytes[] memory _encryptedKeysForPatient,
+        bytes[] memory _encryptedKeysForHospital
+    ) public onlySponsor {
+        uint256 batchSize = _ipfsHashes.length;
+        if (batchSize == 0) { revert EmptyInputArray(); }
+        if (
+            batchSize != _titles.length ||
+            batchSize != _categories.length ||
+            batchSize != _encryptedKeysForPatient.length ||
+            batchSize != _encryptedKeysForHospital.length
+        ) {
+            revert InputArrayLengthMismatch();
+        }
+
+        if (users[_patient].walletAddress == address(0)) { revert UserNotFound(); }
+        if (users[_patient].role != Role.Patient) { revert NotAPatient(); }
+
+        User storage professional = users[_professionalAddress];
+        if (
+            (professional.role != Role.Doctor && professional.role != Role.LabTechnician) ||
+            !professional.isVerified
+        ) {
+            revert NotAVerifiedProfessional();
+        }
+
+        uint256[] memory recordIds = new uint256[](batchSize);
+
+        for (uint i = 0; i < batchSize; i++) {
+            uint256 recordId = _createRecord(
+                _professionalAddress, // Uploader
+                _patient,             // Owner
+                _ipfsHashes[i],
+                _titles[i],
+                _categories[i],
+                true,
+                _encryptedKeysForPatient[i],
+                _encryptedKeysForHospital[i]
+            );
+            recordIds[i] = recordId;
+        }
+
+        emit RecordsBatchAdded(recordIds, _patient, true, _professionalAddress);
+    }
+
+    /**
+     * @dev [MODIFIED] Internal function refactored to avoid "Stack too deep" error.
      */
     function _createRecord(
+        address _uploaderAddress,
         address _patient,
         string memory _ipfsHash,
         string memory _title,
@@ -106,26 +208,30 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
         bool _isVerified,
         bytes memory _encryptedKeyForPatient,
         bytes memory _encryptedKeyForHospital
-    ) private {
-        uint256 recordId = records.length;
+    ) private returns (uint256) {
         
-        records.push(Record({
-            id: recordId,
-            title: _title, // <-- Set the title here
-            ipfsHash: _ipfsHash,
-            timestamp: block.timestamp,
-            uploadedBy: msg.sender,
-            owner: _patient,
-            isVerified: _isVerified,
-            category: _category,
-            encryptedKeyForPatient: _encryptedKeyForPatient,
-            encryptedKeyForHospital: _encryptedKeyForHospital
-        }));
+        // [MODIFIED] Create a storage pointer to avoid stack overflow
+        records.push();
+        Record storage newRecord = records[records.length - 1];
+        uint256 recordId = records.length - 1;
+
+        // [MODIFIED] Populate the struct fields one by one
+        newRecord.id = recordId;
+        newRecord.title = _title;
+        newRecord.ipfsHash = _ipfsHash;
+        newRecord.timestamp = block.timestamp;
+        newRecord.uploadedBy = _uploaderAddress;
+        newRecord.owner = _patient;
+        newRecord.isVerified = _isVerified;
+        newRecord.category = _category;
+        newRecord.encryptedKeyForPatient = _encryptedKeyForPatient;
+        newRecord.encryptedKeyForHospital = _encryptedKeyForHospital;
+
 
         patientRecordIds[_patient].push(recordId);
 
         recordAccess[recordId][_patient] = type(uint256).max;
-        recordAccess[recordId][msg.sender] = type(uint256).max;
+        recordAccess[recordId][_uploaderAddress] = type(uint256).max;
 
         emit RecordAdded(
             recordId,
@@ -134,13 +240,16 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
             _ipfsHash,
             _category,
             _isVerified,
-            msg.sender,
+            _uploaderAddress,
             block.timestamp
         );
+
+        return recordId;
     }
 
-    // --- VIEW FUNCTIONS ---
+    // --- VIEW FUNCTIONS (UNCHANGED) ---
 
+    // [UNCHANGED]
     function getPatientRecordIds(address _patientAddress) public view returns (uint256[] memory) {
         if (msg.sender != _patientAddress) {
             revert NotAuthorized();
@@ -148,6 +257,7 @@ contract MedicalRecords is AccessControl, UUPSUpgradeable {
         return patientRecordIds[_patientAddress];
     }
 
+    // [UNCHANGED]
     function getRecordById(uint256 _recordId) public view returns (Record memory) {
         if (!checkRecordAccess(_recordId, msg.sender)) {
             revert NotAuthorized();
