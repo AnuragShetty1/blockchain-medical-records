@@ -175,15 +175,31 @@ const revokeSponsorRole = async (sponsorAddress) => {
  * @dev Registers a new user, sponsored by the backend.
  * @param {string} userAddress The user's wallet address.
  * @param {string} name The user's name.
- * @param {string} role The user's role (e.g., 'Patient').
+ * @param {string|number} role The user's role (e.g., 'Patient' or 0).
+ * @param {number} hospitalId The hospital ID (0 for patients). This is received but NOT passed to the contract.
  */
-const registerUser = async (userAddress, name, role) => {
+const registerUser = async (userAddress, name, role, hospitalId) => {
     if (!sponsorContract) throw new Error('Ethers service is not initialized.');
-    const roleIndex = ROLE_MAP[role];
-    if (roleIndex === undefined) {
-        throw new Error(`Invalid role string: ${role}`);
+    
+    let roleIndex;
+    
+    // [FIX] Check if the role is already a number (like 1)
+    if (typeof role === 'number') {
+        roleIndex = role;
+    } else {
+        // If it's a string (like "Doctor"), look it up
+        roleIndex = ROLE_MAP[role];
     }
+    
+    // [FIX] Check all valid role indices
+    if (roleIndex === undefined || roleIndex < 0 || roleIndex > 8) {
+        throw new Error(`Invalid role: ${role}`);
+    }
+
     try {
+        // [FIX] REMOVED hospitalId from the contract call.
+        // The contract (per your plan) only takes (address, name, role).
+        // The hospitalId is handled by the off-chain API call.
         const tx = await sponsorContract.registerUser(userAddress, name, roleIndex);
         return tx;
     } catch (error) {
@@ -435,11 +451,10 @@ const addVerifiedRecordsBatch = async (professionalAddress, patient, ipfsHashes,
 init();
 
 // [MODIFIED] Export all functions (Admin and new Sponsor functions)
-module.exports = { // [FIX] Typo from plan 'Ethers_' corrected to 'exports'
-    ethers, // [NEW] Export ethers object
-    
-    // [NEW] Admin helper
-    getAdminAddress,
+// [FIX] Add 'ethers' and 'getAdminAddress' to exports
+module.exports = {
+    ethers, // Export ethers for the admin route
+    getAdminAddress, // Export the admin address getter
 
     // Admin functions
     verifyHospital,
