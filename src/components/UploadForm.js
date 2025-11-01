@@ -46,8 +46,9 @@ export default function UploadForm() {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (files.length === 0 || !title || !category) { // <-- MODIFIED: check for files
-            toast.error("Please provide at least one file, a batch title, and a category.");
+        // --- [THIS IS THE FIX] --- Removed `!title` from the validation
+        if (files.length === 0 || !category) { 
+            toast.error("Please provide at least one file and a category.");
             return;
         }
         if (!api || !keyPair || !userProfile?.publicKey) { // <-- MODIFIED: check for api
@@ -81,8 +82,9 @@ export default function UploadForm() {
                 if (!uploadResponse.ok) throw new Error(uploadData.error || 'Failed to upload encrypted bundle');
                 const bundleHash = uploadData.ipfsHash;
 
-                // Create a unique title for this file based on the batch title and file name
-                const fileTitle = `${title} - ${file.name}`;
+                // --- [THIS IS THE FIX] ---
+                // If title is provided, use "Batch Title - file.name", otherwise just use "file.name"
+                const fileTitle = title ? `${title} - ${file.name}` : file.name;
 
                 const metadata = {
                     title: fileTitle,
@@ -153,8 +155,10 @@ export default function UploadForm() {
             <form onSubmit={handleSubmit} className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                        <label htmlFor="title" className="block text-sm font-medium text-slate-700 mb-2">Batch Title</label>
-                        <input type="text" id="title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g., Annual Blood Tests" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" required />
+                        {/* --- [THIS IS THE FIX] --- Added (Optional) to label */}
+                        <label htmlFor="title" className="block text-sm font-medium text-slate-700 mb-2">Batch Title (Optional)</label>
+                        {/* --- [THIS IS THE FIX] --- Removed `required` */}
+                        <input type="text" id="title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g., Annual Blood Tests" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />
                     </div>
                     <div>
                         <label htmlFor="category" className="block text-sm font-medium text-slate-700 mb-2">Category (for all files)</label>
@@ -195,11 +199,11 @@ export default function UploadForm() {
                         </div>
                     )}
                 </div>
-                <button type="submit" disabled={isUploading || files.length === 0 || !title} className="w-full px-4 py-3 font-bold text-white bg-teal-600 rounded-lg hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:bg-slate-400 transition-colors shadow-lg">
+                {/* --- [THIS IS THE FIX] --- Removed `!title` from disabled check */}
+                <button type="submit" disabled={isUploading || files.length === 0} className="w-full px-4 py-3 font-bold text-white bg-teal-600 rounded-lg hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:bg-slate-400 transition-colors shadow-lg">
                     {isUploading ? 'Processing Batch...' : `Encrypt & Upload ${files.length} Record(s)`}
                 </button>
             </form>
         </div>
     );
 }
-

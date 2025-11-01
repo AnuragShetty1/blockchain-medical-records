@@ -383,18 +383,68 @@ router.get('/access-requests/patient/:address', async (req, res, next) => {
  */
 router.post('/access-requests/respond', async (req, res, next) => {
     try {
-        const { requestId, response } = req.body; 
+        // [MODIFIED] Destructure new 'grants' array from body
+        const { requestId, response, grants } = req.body;
 
         if (requestId === undefined || !['approved', 'rejected'].includes(response)) {
             return res.status(400).json({ success: false, message: 'Invalid request ID or response.' });
         }
 
+        // [MODIFIED] Find the request and *keep* it in memory
         const request = await AccessRequest.findOne({ requestId: requestId, status: 'pending' });
 
         if (!request) {
             return res.status(404).json({ success: false, message: 'Pending request not found.' });
         }
 
+        // --- [NEW LOGIC] ---
+        // If approved, we must create the AccessGrant documents.
+        if (response === 'approved') {
+            // Check if the required 'grants' array is provided
+            if (!grants || !Array.isArray(grants) || grants.length === 0) {
+                logger.error(`Approval for request ${requestId} failed: Missing 'grants' array with rewrapped keys.`);
+                return res.status(400).json({
+                    success: false,
+                    message: 'Approval requires a non-empty "grants" array with rewrapped keys and expiration dates.'
+                });
+            }
+
+            // Verify that the grants provided match the records in the request
+            const requestedRecordIds = new Set(request.recordIds.map(id => id.toString()));
+            const grantedRecordIds = new Set(grants.map(g => g.recordId.toString()));
+
+            if (requestedRecordIds.size !== grantedRecordIds.size ||
+                ![...requestedRecordIds].every(id => grantedRecordIds.has(id))) {
+
+                logger.warn(`Grant mismatch for request ${requestId}. Requested: [${[...requestedRecordIds].join()}] Granted: [${[...grantedRecordIds].join()}]`);
+                return res.status(400).json({ success: false, message: 'Granted records do not match requested records.' });
+            }
+
+            // Map the grants array to the AccessGrant schema
+            const newGrants = grants.map(grant => ({
+                recordId: grant.recordId,
+                patientAddress: request.patientAddress,
+                professionalAddress: request.professionalAddress,
+                rewrappedKey: grant.rewrappedKey,
+                expirationTimestamp: new Date(grant.expirationTimestamp),
+            }));
+
+            // Insert all new grants into the database
+            try {
+                await AccessGrant.insertMany(newGrants, { ordered: false });
+                logger.info(`Successfully created ${newGrants.length} access grants for request ${requestId}.`);
+            } catch (error) {
+                // Handle potential duplicate key errors if grants already exist
+                if (error.code === 11000) {
+                    logger.warn(`Some access grants for request ${requestId} already existed.`);
+                } else {
+                    throw error; // Re-throw other errors
+                }
+            }
+        }
+        // --- [END NEW LOGIC] ---
+
+        // [UNCHANGED] Update the original request status
         request.status = response;
         await request.save();
 
@@ -1015,6 +1065,4 @@ router.post('/sponsored/add-verified-records-batch', /*authenticate,*/ (req, res
         next
     );
 });
-
-
 module.exports = router;

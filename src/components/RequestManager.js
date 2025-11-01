@@ -21,7 +21,7 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
     const [selectedRequestForApproval, setSelectedRequestForApproval] = useState(null);
     const [processingId, setProcessingId] = useState(null);
 
-    // --- 2. ADD MODAL STATE ---
+    // --- 2. ADD MODAL STATE (unchanged) ---
     const [modalState, setModalState] = useState({
         isOpen: false,
         title: '',
@@ -31,20 +31,21 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
         confirmColor: 'bg-indigo-600',
     });
 
-    // Function to close the modal (respecting the loading state)
+    // Function to close the modal (respecting the loading state) (unchanged)
     const closeModal = () => {
         if (processingId) return; // Use existing loading state
         setModalState({ ...modalState, isOpen: false });
     };
 
-    // Function to open the modal (currently only for reject)
+    // Function to open the modal (currently only for reject) (unchanged)
     const openConfirm = (actionType, item) => {
         if (actionType === 'reject') {
             setModalState({
                 isOpen: true,
                 title: 'Reject Request',
                 message: `Are you sure you want to reject the access request from ${item.professional}? This action cannot be undone.`,
-                onConfirm: () => handleProfessionalResponse(item.requestId, 'rejected'),
+                // [MODIFIED] Pass 'undefined' for the 'grants' argument
+                onConfirm: () => handleProfessionalResponse(item.requestId, 'rejected', undefined),
                 confirmText: 'Reject',
                 confirmColor: 'bg-red-600'
             });
@@ -54,10 +55,12 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
     // --- END OF MODAL STATE ---
 
 
+    // (This function is for the *other* workflow - unchanged)
     const handleDurationChange = (requestId, value) => {
         setDurations(prev => ({ ...prev, [requestId]: value }));
     };
 
+    // (This function is for the *other* workflow - unchanged)
     const handleApproveInsurance = async (requestId) => {
         if (!contract || !account) return;
         setProcessingId(`ins-${requestId}`);
@@ -77,17 +80,35 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
         }
     };
 
-    const handleProfessionalResponse = async (requestId, response) => {
-        // This function is now primarily called by the modal's onConfirm for 'rejected'
+    // --- [START OF FINAL FIX] ---
+
+    /**
+     * @param {number} requestId - The ID of the professional request.
+     * @param {'approved' | 'rejected'} response - The response.
+     * @param {Array} [grants] - (Optional) The array of grant objects from AccessManager.
+     */
+    const handleProfessionalResponse = async (requestId, response, grants) => {
+        // [MODIFIED] This function now accepts the 'grants' array
+        
         setProcessingId(requestId);
         const toastId = toast.loading(`Processing your response...`);
         try {
-            await axios.post('http://localhost:3001/api/users/access-requests/respond', { requestId, response });
+            // [MODIFIED] Create the payload dynamically
+            const payload = { requestId, response };
+            if (response === 'approved' && grants) {
+                payload.grants = grants;
+            }
+
+            // [MODIFIED] Send the new payload
+            await axios.post('http://localhost:3001/api/users/access-requests/respond', payload);
+            
             toast.success(`Request successfully ${response}!`, { id: toastId });
             onRequestsUpdate(); // --- MODIFIED: Call the prop to trigger a refetch in the parent
         } catch (error) {
             console.error(`Failed to ${response} request:`, error);
-            toast.error(`Failed to ${response} request.`, { id: toastId });
+            // [MODIFIED] Provide a more specific error if the backend rejected it (400)
+            const apiErrorMessage = error.response?.data?.message;
+            toast.error(apiErrorMessage || `Failed to ${response} request.`, { id: toastId });
         } finally {
             setProcessingId(null);
             closeModal(); // Close modal on completion
@@ -95,20 +116,27 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
     };
 
     const handleApproveProfessionalClick = (request) => {
-        // Confirmation for Approval likely belongs in AccessManager, so this remains unchanged for now
+        // (This part is unchanged)
         setSelectedRequestForApproval(request);
         setIsAccessManagerOpen(true);
     };
 
-    const onGrantSuccess = () => {
-        // Called by AccessManager after successful grant
+    /**
+     * @param {Array} grants - The grants array passed back from AccessManager.
+     */
+    const onGrantSuccess = (grants) => {
+        // [MODIFIED] This function now receives the 'grants' array
+        
         if (selectedRequestForApproval) {
-            // Mark the original request as approved in the backend *after* successful grant
-             handleProfessionalResponse(selectedRequestForApproval.requestId, 'approved');
+            // [MODIFIED] Pass the received 'grants' array to the API handler
+             handleProfessionalResponse(selectedRequestForApproval.requestId, 'approved', grants);
         }
         setIsAccessManagerOpen(false);
         setSelectedRequestForApproval(null);
     };
+
+    // --- [END OF FINAL FIX] ---
+
 
     const combinedRequests = [
         ...(professionalRequests || []).map(r => ({ ...r, type: 'Professional' })),
@@ -127,7 +155,7 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
                         address: selectedRequestForApproval.professionalAddress
                     }}
                     preselectedRecords={selectedRequestForApproval.requestedRecords}
-                    onGrantSuccess={onGrantSuccess}
+                    onGrantSuccess={onGrantSuccess} // This prop now passes 'grants' to our onGrantSuccess function
                 />
             )}
 
@@ -169,7 +197,7 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
                                             {req.type === 'Professional' ? (
                                                 <ul className="list-disc list-inside space-y-1 text-xs">
                                                      {/* Ensure requestedRecords is always an array */}
-                                                    {(req.requestedRecords || []).map(rec => <li key={rec.recordId}>- {rec.title}</li>)}
+                                                     {(req.requestedRecords || []).map(rec => <li key={rec.recordId}>- {rec.title}</li>)}
                                                 </ul>
                                             ) : (
                                                 <div className="text-xs"><strong>Claim ID:</strong> {req.claimId}</div>
@@ -179,14 +207,14 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
                                             {req.type === 'Professional' ? (
                                                 <div className="flex items-center justify-center gap-2">
                                                     <button
-                                                        onClick={() => openConfirm('reject', req)} // <-- 3. MODIFY ONCLICK
+                                                        onClick={() => openConfirm('reject', req)} // <-- 3. MODIFY ONCLICK (unchanged)
                                                         disabled={processingId === req.requestId}
                                                         className="px-3 py-1.5 text-xs font-semibold bg-red-100 text-red-700 rounded-md hover:bg-red-200 disabled:opacity-50 inline-flex items-center"
                                                     >
                                                         <RejectIcon /> Reject
                                                     </button>
                                                     <button
-                                                        onClick={() => handleApproveProfessionalClick(req)} // Stays the same for now
+                                                        onClick={() => handleApproveProfessionalClick(req)} // (unchanged)
                                                         disabled={processingId === req.requestId}
                                                         className="px-3 py-1.5 text-xs font-semibold bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 inline-flex items-center"
                                                     >
@@ -221,7 +249,7 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
                 </div>
             </div>
 
-            {/* --- 4. RENDER THE MODAL --- */}
+            {/* --- 4. RENDER THE MODAL (unchanged) --- */}
             <ConfirmationModal
                 isOpen={modalState.isOpen}
                 onClose={closeModal}

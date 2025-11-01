@@ -7,7 +7,7 @@ import { rewrapSymmetricKey } from '@/utils/crypto';
 import { fetchFromIPFS } from '@/utils/ipfs'; // --- MODIFICATION: Import the resilient IPFS fetch utility ---
 import ConfirmationModal from './ConfirmationModal'; // <-- 1. IMPORT MODAL
 
-// --- ICONS ---
+// --- ICONS (unchanged) ---
 const ShareIcon = () => <svg className="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.186 2.25 2.25 0 00-3.933 2.186z" /></svg>;
 const CloseIcon = () => <svg className="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>;
 const SpinnerWhite = () => <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>;
@@ -36,7 +36,7 @@ export default function AccessManager({
     const isBulkShare = records.length > 1;
     const finalDuration = duration === 'custom' ? Number(customDuration) : Number(duration);
 
-    // --- 2. ADD MODAL STATE ---
+    // --- 2. ADD MODAL STATE (unchanged) ---
     const [modalState, setModalState] = useState({
         isOpen: false,
         title: '',
@@ -46,13 +46,13 @@ export default function AccessManager({
         confirmColor: 'bg-indigo-600',
     });
 
-    // Function to close the modal (respecting the loading state)
+    // Function to close the modal (respecting the loading state) (unchanged)
     const closeModal = () => {
         if (isLoading) return; // Use existing loading state
         setModalState({ ...modalState, isOpen: false });
     };
 
-    // Function to open the modal for grant action
+    // Function to open the modal for grant action (unchanged)
     const openConfirm = () => {
         // Perform initial validation *before* showing the modal
          if (!ethers.isAddress(granteeAddress)) {
@@ -83,13 +83,17 @@ export default function AccessManager({
     // --- END OF MODAL STATE ---
 
 
-    // --- 3. RENAMED ORIGINAL FUNCTION & MOVED LOGIC ---
+    // --- 3. RENAMED ORIGINAL FUNCTION & MOVED LOGIC (unchanged) ---
     // This function now contains the core logic previously in handleGrantAccess
     const confirmGrantAccess = async () => {
         // No need for validation here, it was done in openConfirm
 
         setIsLoading(true);
         const toastId = toast.loading("Verifying professional and checking permissions...");
+
+        // [MODIFIED] Declare variables here to pass to onGrantSuccess
+        let recordIdsToGrant;
+        let encryptedDeks;
 
         try {
             const professional = await contract.users(granteeAddress);
@@ -106,9 +110,12 @@ export default function AccessManager({
             toast.loading("Fetching encrypted data and preparing secure keys...", { id: toastId });
 
             const professionalPublicKey = professional.publicKey;
-            const recordIdsToGrant = records.map(r => r.recordId);
+            
+            // [MODIFIED] Assign to outer variable
+            recordIdsToGrant = records.map(r => r.recordId);
 
-            const encryptedDeks = await Promise.all(
+            // [MODIFIED] Assign to outer variable
+            encryptedDeks = await Promise.all(
                 records.map(async (record) => {
                     const fullRecordData = await contract.records(record.recordId);
                     const ipfsHash = fullRecordData.ipfsHash;
@@ -145,9 +152,24 @@ export default function AccessManager({
 
             toast.success(`Access granted successfully for ${finalDuration} days!`, { id: toastId });
 
+            // --- [START OF NEW MINIMAL CHANGE] ---
+            // 1. Calculate the expiration timestamp
+            const expirationTimestamp = new Date();
+            expirationTimestamp.setDate(expirationTimestamp.getDate() + finalDuration);
+
+            // 2. Build the 'grants' array that the backend API needs
+            const grants = recordIdsToGrant.map((id, index) => ({
+                recordId: id,
+                rewrappedKey: encryptedDeks[index],
+                expirationTimestamp: expirationTimestamp.toISOString(), // Send as ISO string
+            }));
+            // --- [END OF NEW MINIMAL CHANGE] ---
+
+
             // FIX: Call the correct success handler depending on the flow.
             if (onGrantSuccess) {
-                onGrantSuccess();
+                // [MODIFIED] Pass the new 'grants' array back to RequestManager
+                onGrantSuccess(grants);
             } else {
                 onClose(); // Call original onClose if no specific success handler
             }
@@ -156,7 +178,7 @@ export default function AccessManager({
         } catch (error) {
             console.error("Failed to grant access:", error);
             let errorMessage = "An unexpected error occurred.";
-              if (error.reason) { // Ethers v6 contract revert reason
+             if (error.reason) { // Ethers v6 contract revert reason
                 errorMessage = error.reason;
             } else if (error.message) {
                 errorMessage = error.message;
@@ -169,7 +191,7 @@ export default function AccessManager({
         }
     };
 
-    // --- 4. MODIFY FORM SUBMISSION HANDLER ---
+    // --- 4. MODIFY FORM SUBMISSION HANDLER (unchanged) ---
     // This now only calls openConfirm to show the modal
     const handleGrantAccessSubmit = async (e) => {
          e.preventDefault();
@@ -182,6 +204,7 @@ export default function AccessManager({
         return null;
     }
 
+    // (Rest of the file is unchanged)
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 animate-fade-in"> {/* Removed backdrop-blur-sm */}
             <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-xl border border-slate-200 p-8">
@@ -208,7 +231,7 @@ export default function AccessManager({
                     </div>
                 </div>
 
-                {/* --- 5. POINT FORM ONSUBMIT TO THE NEW HANDLER --- */}
+                {/* --- 5. POINT FORM ONSUBMIT TO THE NEW HANDLER (unchanged) --- */}
                 <form onSubmit={handleGrantAccessSubmit} className="space-y-6">
                     <div>
                         <label htmlFor="granteeAddress" className="block text-sm font-medium text-slate-700 mb-2">
@@ -277,7 +300,7 @@ export default function AccessManager({
                 </form>
             </div>
 
-             {/* --- 6. RENDER THE CONFIRMATION MODAL --- */}
+             {/* --- 6. RENDER THE CONFIRMATION MODAL (unchanged) --- */}
             <ConfirmationModal
                 isOpen={modalState.isOpen}
                 onClose={closeModal}
@@ -291,3 +314,4 @@ export default function AccessManager({
         </div>
     );
 }
+
