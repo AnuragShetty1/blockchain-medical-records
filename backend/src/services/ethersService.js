@@ -264,12 +264,17 @@ const requestRegistration = async (requesterAddress, hospitalName) => {
  * @param {string|number} recordId The record ID.
  * @param {string} grantee The address of the professional receiving access.
  * @param {number} durationInDays The duration of access.
- * @param {string} encryptedDek The encrypted data key for the grantee.
+ * @param {object} encryptedDek The encrypted data key for the grantee (as a JS object).
  */
 const grantRecordAccess = async (patientAddress, recordId, grantee, durationInDays, encryptedDek) => {
     if (!sponsorContract) throw new Error('Ethers service is not initialized.');
     try {
-        const tx = await sponsorContract.grantRecordAccess(patientAddress, BigInt(recordId), grantee, BigInt(durationInDays), encryptedDek);
+        // --- [THIS IS THE FIX] ---
+        // Convert the JS object into a JSON string, *then* convert to bytes.
+        const encryptedDekBytes = ethers.toUtf8Bytes(JSON.stringify(encryptedDek));
+        // --- [END OF FIX] ---
+
+        const tx = await sponsorContract.grantRecordAccess(patientAddress, BigInt(recordId), grantee, BigInt(durationInDays), encryptedDekBytes);
         return tx;
     } catch (error) {
         logger.error(`Error in sponsored grantRecordAccess call for ${patientAddress}: ${error.message}`);
@@ -283,13 +288,19 @@ const grantRecordAccess = async (patientAddress, recordId, grantee, durationInDa
  * @param {Array<string|number>} recordIds Array of record IDs.
  * @param {string} grantee The address of the professional receiving access.
  * @param {number} durationInDays The duration of access.
- * @param {Array<string>} encryptedDeks Array of encrypted data keys.
+ * @param {Array<object>} encryptedDeks Array of encrypted data keys (as JS objects).
  */
 const grantMultipleRecordAccess = async (patientAddress, recordIds, grantee, durationInDays, encryptedDeks) => {
     if (!sponsorContract) throw new Error('Ethers service is not initialized.');
     try {
         const recordIdsBigInt = recordIds.map(id => BigInt(id));
-        const tx = await sponsorContract.grantMultipleRecordAccess(patientAddress, recordIdsBigInt, grantee, BigInt(durationInDays), encryptedDeks);
+        
+        // --- [THIS IS THE FIX] ---
+        // Convert the JS objects into JSON strings, *then* convert to bytes.
+        const encryptedDeksBytes = encryptedDeks.map(keyObject => ethers.toUtf8Bytes(JSON.stringify(keyObject)));
+        // --- [END OF FIX] ---
+
+        const tx = await sponsorContract.grantMultipleRecordAccess(patientAddress, recordIdsBigInt, grantee, BigInt(durationInDays), encryptedDeksBytes);
         return tx;
     } catch (error) {
         logger.error(`Error in sponsored grantMultipleRecordAccess call for ${patientAddress}: ${error.message}`);
@@ -431,7 +442,7 @@ const addSelfUploadedRecordsBatch = async (patientAddress, ipfsHashes, titles, c
  * @param {Array<string>} ipfsHashes Array of IPFS hashes.
  * @param {Array<string>} titles Array of titles.
  * @param {Array<string>} categories Array of categories.
- * @param {Array<string>} encryptedKeysForPatient Array of encrypted keys for the patient (as JSON strings).
+ *S* @param {Array<string>} encryptedKeysForPatient Array of encrypted keys for the patient (as JSON strings).
  * @param {Array<string>} encryptedKeysForHospital Array of encrypted keys for the hospital (as JSON strings).
  */
 const addVerifiedRecordsBatch = async (professionalAddress, patient, ipfsHashes, titles, categories, encryptedKeysForPatient, encryptedKeysForHospital) => {
@@ -493,3 +504,4 @@ module.exports = {
     addSelfUploadedRecordsBatch,
     addVerifiedRecordsBatch,
 };
+

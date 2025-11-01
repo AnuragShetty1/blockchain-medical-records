@@ -52,7 +52,7 @@ const authenticate = (req, res, next) => {
         if (decoded.sub) {
              req.user.address = decoded.sub.split(':').pop(); // Get address from "eip155:13881:0x..."
         } else {
-            logger.warn("JWT was valid but did not contain a 'sub' (address) field.");
+             logger.warn("JWT was valid but did not contain a 'sub' (address) field.");
         }
 
         next();
@@ -744,46 +744,53 @@ router.post('/sponsored/request-registration', /*authenticate,*/ (req, res, next
 
 /**
  * @route   POST /api/users/sponsored/grant-access
- * @desc    Sponsors the 'grantMultipleRecordAccess' transaction.
+ * @desc    Sponsors the 'grantRecordAccess' transaction (for a single record).
  * @access  Private (Patient only)
  */
 router.post('/sponsored/grant-access', /*authenticate,*/ (req, res, next) => {
-    // [FIX] Read 'userAddress' from req.body for testing
-    // [FIX] Read 'professionalAddress' and 'recordIds' from frontend 'api' definition
-    const { professionalAddress, recordIds, userAddress: bodyAddress } = req.body;
-    const patientAddress = req.user?.address || bodyAddress; // The patient is the one granting
+    const { professionalAddress, recordId, duration, encryptedDek, userAddress: bodyAddress } = req.body;
+    const patientAddress = req.user?.address || bodyAddress; 
 
-    // [FIX] Update validation to match new params
-    if (!recordIds || !professionalAddress) {
-        return res.status(400).json({ success: false, message: 'Missing required fields: recordIds, professionalAddress' });
+    if (!professionalAddress || recordId === undefined || !duration || !encryptedDek) {
+        return res.status(400).json({ success: false, message: 'Missing required fields: professionalAddress, recordId, duration, encryptedDek' });
     }
      if (!patientAddress) {
          return res.status(400).json({ success: false, message: 'Missing userAddress.' });
     }
 
-    // [FIX] Call the correct service function. This seems to be a mismatch.
-    // The frontend calls grantRecordAccess, but the backend implementation calls grantMultipleRecordAccess.
-    // Based on the frontend `api` object, it looks like it's sending `professionalAddress` (string) and `recordIds` (array).
-    // The plan says `grantMultipleRecordAccess` is for `professionals` (array).
-    // I will assume the frontend `grantRecordAccess` is for a *single* professional and *multiple* records.
-    // This requires a `durationInDays` and `encryptedDeks`, which the frontend is NOT sending.
-    // This part of the plan is contradictory.
-    // I will modify this route to match the *old* `grantMultipleRecordAccess` from your plan for now,
-    // as it's the only one that makes sense.
-    // THIS WILL LIKELY FAIL and will need to be fixed when we implement this feature.
-    // For now, I'll just fix the userAddress bug.
-    const { durationInDays, encryptedDeks } = req.body; // These will be undefined
-     if (!durationInDays || !encryptedDeks) {
-        logger.warn("/sponsored/grant-access called without durationInDays or encryptedDeks. This will fail.");
-        // Don't block, just log.
-     }
-
     handleTransaction(
-        ethersService.grantMultipleRecordAccess(patientAddress, recordIds, professionalAddress, durationInDays || 30, encryptedDeks || []),
+        ethersService.grantRecordAccess(patientAddress, recordId, professionalAddress, duration, encryptedDek),
         res,
         next
     );
 });
+
+/**
+ * @route   POST /api/users/sponsored/grant-multiple-access
+ * @desc    Sponsors the 'grantMultipleRecordAccess' transaction.
+ * @access  Private (Patient only)
+ */
+router.post('/sponsored/grant-multiple-access', /*authenticate,*/ (req, res, next) => {
+    const { professionalAddress, recordIds, duration, encryptedDeks, userAddress: bodyAddress } = req.body;
+    const patientAddress = req.user?.address || bodyAddress; // The patient is the one granting
+
+    if (!professionalAddress || !recordIds || !Array.isArray(recordIds) || !duration || !encryptedDeks || !Array.isArray(encryptedDeks)) {
+        return res.status(400).json({ success: false, message: 'Missing required fields: professionalAddress, recordIds, duration, encryptedDeks' });
+    }
+    if (recordIds.length !== encryptedDeks.length) {
+         return res.status(400).json({ success: false, message: 'Record IDs and Encrypted Keys array length mismatch.' });
+    }
+     if (!patientAddress) {
+         return res.status(400).json({ success: false, message: 'Missing userAddress.' });
+    }
+
+    handleTransaction(
+        ethersService.grantMultipleRecordAccess(patientAddress, recordIds, professionalAddress, duration, encryptedDeks),
+        res,
+        next
+    );
+});
+
 
 /**
  * @route   POST /api/users/sponsored/revoke-access
@@ -1011,4 +1018,3 @@ router.post('/sponsored/add-verified-records-batch', /*authenticate,*/ (req, res
 
 
 module.exports = router;
-

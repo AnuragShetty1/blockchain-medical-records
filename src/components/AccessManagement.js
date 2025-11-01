@@ -30,7 +30,7 @@ const TableSkeleton = () => (
 
 export default function AccessManagement() {
     // --- STATE AND LOGIC (UNCHANGED) ---
-    const { account, contract } = useWeb3();
+    const { account, contract, api } = useWeb3(); // <-- Import API
     const [grants, setGrants] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isRevoking, setIsRevoking] = useState(null); // Keep this for button loading state
@@ -89,21 +89,25 @@ export default function AccessManagement() {
 
     const handleRevoke = async (professionalAddress, recordIds) => {
         // This function is now called by the modal's onConfirm
-        if (!contract) {
-            toast.error("Blockchain contract not available.");
+        if (!api) { // <-- Check for API
+            toast.error("API service not available.");
             return;
         }
         setIsRevoking(professionalAddress); // Set loading state for the button
         const toastId = toast.loading("Preparing revocation transaction...");
         try {
-            const tx = await contract.revokeMultipleRecordAccess(professionalAddress, recordIds);
-            toast.loading("Broadcasting transaction...", { id: toastId });
-            await tx.wait();
+            // --- THIS IS THE MIGRATION ---
+            // Replaced direct contract call with the sponsored API call
+            // We use `revokeRecordAccess` as it takes (professionalAddress, recordIds)
+            await api.revokeRecordAccess(professionalAddress, recordIds);
+            // --- END OF MIGRATION ---
+
             toast.success("Access successfully revoked! The list will update shortly.", { id: toastId });
             setTimeout(fetchGrants, 4000);
         } catch (error) {
             console.error("Revocation failed:", error);
-            toast.error(error?.data?.message || "Revocation transaction failed.", { id: toastId });
+            // Use error.message since API errors are standard Error objects
+            toast.error(error.message || "Revocation transaction failed.", { id: toastId });
         } finally {
             setIsRevoking(null); // Clear loading state
             closeModal(); // Close modal on completion

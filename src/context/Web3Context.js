@@ -427,13 +427,11 @@ export const Web3Provider = ({ children }) => {
         },
 
         // --- Access Control (Patient) ---
-        grantRecordAccess: (professionalAddress, recordIds) => {
-            // [FIX] Add userAddress: account to the body
-            return apiFetch('/api/users/sponsored/grant-access', 'POST', { professionalAddress, recordIds, userAddress: account });
+        grantRecordAccess: (professionalAddress, recordId, duration, encryptedDek) => {
+            return apiFetch('/api/users/sponsored/grant-access', 'POST', { professionalAddress, recordId, duration, encryptedDek, userAddress: account });
         },
-        grantMultipleRecordAccess: (professionals, recordIds) => {
-            // [FIX] Add userAddress: account to the body
-            return apiFetch('/api/users/sponsored/grant-multiple-access', 'POST', { professionals, recordIds, userAddress: account });
+        grantMultipleRecordAccess: (professionalAddress, recordIds, duration, encryptedDeks) => {
+            return apiFetch('/api/users/sponsored/grant-multiple-access', 'POST', { professionalAddress, recordIds, duration, encryptedDeks, userAddress: account });
         },
         revokeRecordAccess: (professionalAddress, recordIds) => {
             // [FIX] Add userAddress: account to the body
@@ -689,4 +687,3 @@ export const Web3Provider = ({ children }) => {
 export const useWeb3 = () => {
     return useContext(Web3Context);
 };
-

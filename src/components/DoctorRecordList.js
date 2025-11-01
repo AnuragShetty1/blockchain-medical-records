@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { unwrapSymmetricKey } from '@/utils/crypto';
 import { Eye, Loader2, FileText, AlertTriangle } from 'lucide-react';
 import { fetchFromIPFS } from '@/utils/ipfs'; // --- MODIFICATION: Import the resilient IPFS fetch utility ---
+import { ethers } from 'ethers'; // --- [THIS IS THE FIX] --- Import ethers
 
 
 function RecordMetadataCell({ record, metadataCache, setMetadataCache }) {
@@ -57,7 +58,14 @@ export default function DoctorRecordList({ records }) {
             const encryptedBundle = await bundleResponse.json();
 
             toast.loading("Unwrapping secure key...", { id: toastId });
+
+            // --- [THIS IS THE FIX] ---
+            // The `record.rewrappedKey` is the hex string from the API.
+            // The `unwrapSymmetricKey` function (as shown by the stack trace)
+            // is responsible for calling `ethers.toUtf8String` itself.
+            // We must pass the raw hex string directly to it.
             const symmetricKey = await unwrapSymmetricKey(record.rewrappedKey, encryptedBundle.iv, keyPair.privateKey);
+            // --- [END OF FIX] ---
 
             toast.loading("Decrypting file...", { id: toastId });
             const decryptedData = await window.crypto.subtle.decrypt(
@@ -73,6 +81,7 @@ export default function DoctorRecordList({ records }) {
             
             toast.success("Record decrypted!", { id: toastId });
         } catch (error) {
+            console.error("Decryption error:", error); // Log the full error
             toast.error(error.message || "Could not decrypt the record.", { id: toastId });
         } finally {
             setDecryptingId(null);
@@ -136,3 +145,4 @@ export default function DoctorRecordList({ records }) {
         </div>
     );
 }
+

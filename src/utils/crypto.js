@@ -249,7 +249,7 @@ export const hybridDecrypt = async (encryptedBundle, userPrivateKey) => {
  * @param {Object} encryptedBundle - The full encrypted object from IPFS.
  * @param {CryptoKey} patientPrivateKey - The patient's private key to decrypt the original DEK.
  * @param {string} professionalPublicKeyBase64 - The professional's public key to re-encrypt for.
- * @returns {Promise<Uint8Array>} The re-wrapped key bundle as a Uint8Array, ready for the smart contract.
+ * @returns {Promise<Object>} The re-wrapped key bundle as a serializable JS object.
  */
 export const rewrapSymmetricKey = async (encryptedBundle, patientPrivateKey, professionalPublicKeyBase64) => {
     const { iv, encryptedSymmetricKeys } = encryptedBundle;
@@ -307,8 +307,9 @@ export const rewrapSymmetricKey = async (encryptedBundle, patientPrivateKey, pro
         wrappedKey: Array.from(new Uint8Array(newWrappedKey))
     };
 
-    // [FIX] Return a Uint8Array, which ethers can correctly process as `bytes`.
-    return new TextEncoder().encode(JSON.stringify(rewrappedBundle));
+    // [FIX] Return the raw JS object. The API layer will stringify it,
+    // and the backend service will convert that string to bytes.
+    return rewrappedBundle;
 };
 
 /**
@@ -358,4 +359,3 @@ export const base64ToUint8Array = (base64) => {
     }
     return bytes;
 };
-

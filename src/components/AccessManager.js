@@ -21,7 +21,7 @@ export default function AccessManager({
     preselectedRecords,
     preselectedProfessional
 }) {
-    const { contract, keyPair } = useWeb3();
+    const { contract, keyPair, api } = useWeb3();
 
     // FIX: The component now correctly uses the preselected professional's address and disables the input for the approval flow.
     const [granteeAddress, setGranteeAddress] = useState(preselectedProfessional?.address || '');
@@ -59,8 +59,8 @@ export default function AccessManager({
             toast.error("Please enter a valid Ethereum wallet address.");
             return;
         }
-         if (!records || records.length === 0 || !contract || !keyPair) {
-            toast.error("Required context (records, contract, or key pair) is missing. Please reconnect wallet and try again.");
+         if (!records || records.length === 0 || !contract || !keyPair || !api) {
+            toast.error("Required context (records, contract, api, or key pair) is missing. Please reconnect wallet and try again.");
             return;
         }
         if (duration === 'custom' && (!customDuration || Number(customDuration) <= 0)) {
@@ -135,15 +135,14 @@ export default function AccessManager({
                 })
             );
 
-            toast.loading("Sending transaction to the blockchain...", { id: toastId });
-            let tx;
+            toast.loading("Sending sponsored transaction to the backend...", { id: toastId });
+            
             if (isBulkShare) {
-                tx = await contract.grantMultipleRecordAccess(recordIdsToGrant, granteeAddress, finalDuration, encryptedDeks);
+                await api.grantMultipleRecordAccess(granteeAddress, recordIdsToGrant, finalDuration, encryptedDeks);
             } else {
-                tx = await contract.grantRecordAccess(recordIdsToGrant[0], granteeAddress, finalDuration, encryptedDeks[0]);
+                await api.grantRecordAccess(granteeAddress, recordIdsToGrant[0], finalDuration, encryptedDeks[0]);
             }
 
-            await tx.wait();
             toast.success(`Access granted successfully for ${finalDuration} days!`, { id: toastId });
 
             // FIX: Call the correct success handler depending on the flow.

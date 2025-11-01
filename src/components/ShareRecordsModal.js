@@ -15,7 +15,7 @@ const CloseIcon = () => <svg className="w-6 h-6" xmlns="http://www.w3.org/2000/s
 
 export default function ShareRecordsModal({ records, recordsToShare, onClose }) {
     // We now get `records` from props, so we only need contract and keyPair from context.
-    const { contract, keyPair } = useWeb3();
+    const { contract, keyPair, api } = useWeb3(); // <-- 1. IMPORT API
 
     const [hospitals, setHospitals] = useState([]);
     const [professionals, setProfessionals] = useState([]);
@@ -62,8 +62,8 @@ export default function ShareRecordsModal({ records, recordsToShare, onClose }) 
 
 
     const handleGrantAccess = async () => {
-        if (!contract || !keyPair?.privateKey || !selectedProfessionalAddress || recordsToShare.length === 0) {
-            toast.error("Cannot proceed. Required information is missing.");
+        if (!api || !keyPair?.privateKey || !selectedProfessionalAddress || recordsToShare.length === 0) { // <-- 2. CHECK FOR API
+            toast.error("Cannot proceed. Required information (api, key, professional) is missing.");
             return;
         }
 
@@ -99,11 +99,14 @@ export default function ShareRecordsModal({ records, recordsToShare, onClose }) 
                 })
             );
 
-            // 3. Send transaction to the blockchain
-            toast.loading("Sending transaction to the blockchain...", { id: toastId });
+            // 3. Send transaction to the backend via API
+            toast.loading("Sending sponsored transaction to the backend...", { id: toastId });
             const durationInDays = 30; // Default duration
-            const tx = await contract.grantMultipleRecordAccess(recordsToShare, selectedProfessionalAddress, durationInDays, rewrappedKeys);
-            await tx.wait();
+
+            // --- 3. THIS IS THE FIX ---
+            // Replaced direct contract call with the sponsored API call
+            await api.grantMultipleRecordAccess(selectedProfessionalAddress, recordsToShare, durationInDays, rewrappedKeys);
+            // --- END OF FIX ---
 
             toast.success("Access granted successfully!", { id: toastId });
             onClose(); // Close the modal on success
@@ -167,7 +170,7 @@ export default function ShareRecordsModal({ records, recordsToShare, onClose }) 
                         </select>
                          {selectedHospital && professionals.length === 0 && (
                             <p className="text-xs text-slate-500 mt-1">No professionals found for this hospital.</p>
-                        )}
+                         )}
                     </div>
                 </div>
 
