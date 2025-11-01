@@ -226,11 +226,14 @@ const UploadSection = () => {
 
 // --- REQUEST ACCESS SECTION REBUILT WITH TWO-COLUMN LAYOUT ---
 const RequestAccessSection = () => {
-    const { contract } = useWeb3();
+    // --- [THIS IS THE FIX] --- Get the `api` object from useWeb3
+    const { api } = useWeb3(); 
     const [patientProfile, setPatientProfile] = useState(null);
     const [patientRecords, setPatientRecords] = useState([]);
     const [isLoadingRecords, setIsLoadingRecords] = useState(false);
     const [selectedRecords, setSelectedRecords] = useState(new Set());
+    // --- [THIS IS THE FIX] --- Add state for justification
+    const [justification, setJustification] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     useEffect(() => {
@@ -261,17 +264,30 @@ const RequestAccessSection = () => {
     
     const handleSubmitRequest = async () => {
         if (selectedRecords.size === 0) return toast.error("Please select at least one record.");
-        if (!contract || !patientProfile) return toast.error("Contract not loaded or patient not selected.");
+        // --- [THIS IS THE FIX] --- Check for `api` instead of `contract`
+        if (!api || !patientProfile) return toast.error("API service not loaded or patient not selected.");
+        if (!justification.trim()) return toast.error("A justification is required to request records.");
         
         setIsSubmitting(true);
         const toastId = toast.loading("Submitting access request...");
         try {
-            const tx = await contract.requestRecordAccess(patientProfile.address, Array.from(selectedRecords));
-            await tx.wait();
+            // --- [THIS IS THE FIX] ---
+            // Replace the direct contract call with the sponsored API call
+            // We pass the new justification state
+            const response = await api.requestRecordAccess(
+                patientProfile.address, 
+                Array.from(selectedRecords),
+                justification
+            );
+            
+            // The API call returns immediately, so we show a "submitted" message
+            // The `tx.wait()` is no longer needed here.
             toast.success("Access request submitted!", { id: toastId });
             setSelectedRecords(new Set());
+            setJustification(''); // Clear justification on success
         } catch (error) {
-            toast.error(error?.data?.message || "An error occurred.", { id: toastId });
+            console.error("Failed to submit request:", error);
+            toast.error(error.message || "An error occurred.", { id: toastId });
         } finally {
             setIsSubmitting(false);
         }
@@ -299,7 +315,7 @@ const RequestAccessSection = () => {
                             {isLoadingRecords ? (
                                 <div className="flex justify-center items-center py-8"><Loader2 className="h-8 w-8 animate-spin text-slate-400" /></div>
                             ) : patientRecords.length > 0 ? (
-                                <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
+                                <div className="space-y-3 max-h-72 overflow-y-auto pr-2">
                                     {patientRecords.map(record => (
                                         <label key={record.recordId} className="flex items-center p-3 bg-slate-50 rounded-lg border border-slate-200 cursor-pointer hover:bg-sky-50/50 hover:border-sky-200 transition-colors">
                                             <input type="checkbox" checked={selectedRecords.has(record.recordId)} onChange={() => handleRecordSelect(record.recordId)} className="h-5 w-5 rounded border-gray-300 text-sky-600 focus:ring-sky-500" />
@@ -311,6 +327,24 @@ const RequestAccessSection = () => {
                             ) : (
                                 <p className="text-slate-500 text-center py-8">This patient has no records available to request.</p>
                             )}
+                             
+                            {/* --- [THIS IS THE FIX] --- Add Justification Textarea --- */}
+                            <div className="pt-6 mt-6 border-t border-slate-200">
+                                <label htmlFor="justification" className="block text-sm font-medium text-slate-700 mb-2">
+                                    Reason for Request (Required)
+                                </label>
+                                <textarea
+                                    id="justification"
+                                    rows="3"
+                                    value={justification}
+                                    onChange={(e) => setJustification(e.target.value)}
+                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
+                                    placeholder="e.g., 'Requesting consultation for follow-up on recent lab results.'"
+                                    disabled={isSubmitting}
+                                ></textarea>
+                            </div>
+                            {/* --- [END OF FIX] --- */}
+
                              <div className="pt-6 mt-6 border-t border-slate-200">
                                 <button onClick={handleSubmitRequest} disabled={isSubmitting || selectedRecords.size === 0} className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 font-semibold text-white bg-sky-600 rounded-lg hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 disabled:bg-slate-400 disabled:cursor-not-allowed transition-colors shadow-sm">
                                     {isSubmitting ? <><Loader2 className="h-5 w-5 animate-spin" /> Submitting...</> : <>Request Access to {selectedRecords.size} Record(s)</>}
