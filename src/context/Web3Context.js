@@ -409,12 +409,11 @@ export const Web3Provider = ({ children }) => {
         },
 
         // --- [THIS IS THE FIX] ---
-        // The API call now sends the three separate arrays that users.js expects.
-        addSelfUploadedRecordsBatch: (ipfsHashes, titles, categories) => {
+        // Based on the backend error, we are changing the function
+        // to accept a single 'records' array.
+        addSelfUploadedRecordsBatch: ({ records }) => {
             return apiFetch('/api/users/sponsored/add-self-records-batch', 'POST', { 
-                ipfsHashes, 
-                titles, 
-                categories, 
+                records, // Pass the 'records' array
                 userAddress: account 
             });
         },
@@ -687,3 +686,4 @@ export const Web3Provider = ({ children }) => {
 export const useWeb3 = () => {
     return useContext(Web3Context);
 };
+
