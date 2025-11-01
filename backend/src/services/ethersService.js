@@ -58,6 +58,22 @@ const init = () => {
     }
 };
 
+// --- [NEW] ADMIN HELPER FUNCTION ---
+/**
+ * @dev Returns the address of the admin signer.
+ * Used by the adminAuth middleware to verify the signature.
+ */
+const getAdminAddress = async () => {
+    if (!adminSigner) {
+        init(); // Ensure signer is initialized if not already
+        if (!adminSigner) { // Double check after init
+             throw new Error('Ethers service admin signer is not initialized.');
+        }
+    }
+    return adminSigner.address;
+};
+
+
 // --- [UNCHANGED] SUPER ADMIN FUNCTIONS ---
 // These functions use the adminContract to perform high-privilege actions.
 
@@ -399,7 +415,7 @@ const addSelfUploadedRecordsBatch = async (patientAddress, ipfsHashes, titles, c
  * @param {Array<string>} ipfsHashes Array of IPFS hashes.
  * @param {Array<string>} titles Array of titles.
  * @param {Array<string>} categories Array of categories.
- *Warning: The provided text is incomplete. Please provide the complete text to receive the full answer.
+Warning: The provided text is incomplete. Please provide the complete text to receive the full answer.
  * @param {Array<string>} encryptedKeysForPatient Array of encrypted keys for the patient.
  * @param {Array<string>} encryptedKeysForHospital Array of encrypted keys for the hospital.
  */
@@ -419,7 +435,12 @@ const addVerifiedRecordsBatch = async (professionalAddress, patient, ipfsHashes,
 init();
 
 // [MODIFIED] Export all functions (Admin and new Sponsor functions)
-module.exports = {
+module.exports = { // [FIX] Typo from plan 'Ethers_' corrected to 'exports'
+    ethers, // [NEW] Export ethers object
+    
+    // [NEW] Admin helper
+    getAdminAddress,
+
     // Admin functions
     verifyHospital,
     revokeHospital,
@@ -444,3 +465,4 @@ module.exports = {
     addSelfUploadedRecordsBatch,
     addVerifiedRecordsBatch,
 };
+

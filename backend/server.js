@@ -18,9 +18,12 @@ const hospitalAdminRoutes = require('./src/api/routes/hospitalAdmin');
 const app = express();
 
 // --- Middlewares ---
-app.use(cors({
-    origin: 'http://localhost:3000'
-}));
+const corsOptions = {
+  origin: 'http://localhost:3000', // Allow requests from your frontend
+  methods: ['GET', 'POST', 'PUT', 'DELETE'], // Explicitly allow POST
+  allowedHeaders: ['Content-Type', 'Authorization'], // Allow these specific headers
+};
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // --- Basic Health Check Route ---

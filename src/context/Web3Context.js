@@ -39,6 +39,9 @@ const web3auth = new Web3Auth({
     chainConfig: initChainConfig,
 });
 
+// [NEW] Define the base URL for your trusted backend
+const API_BASE_URL = 'http://localhost:3001';
+
 export const Web3Provider = ({ children }) => {
     // Core Web3 State
     const [theme, setTheme] = useState('default');
@@ -54,12 +57,16 @@ export const Web3Provider = ({ children }) => {
     const [isLoadingProfile, setIsLoadingProfile] = useState(true);
     const [keyPair, setKeyPair] = useState(null);
     const [needsPublicKeySetup, setNeedsPublicKeySetup] = useState(false);
+    // [NEW] State to hold the user's JWT for API authentication
+    const [idToken, setIdToken] = useState(null);
 
     // App Data State
+    // --- [FIX] RESTORING the state variables I wrongly removed ---
     const [records, setRecords] = useState([]);
     const [requests, setRequests] = useState([]);
     const [accessList, setAccessList] = useState([]);
     const [notifications, setNotifications] = useState([]);
+
     // --- [NEW] State to trigger UI refresh when new requests arrive ---
     const [requestUpdateCount, setRequestUpdateCount] = useState(0);
 
@@ -71,6 +78,7 @@ export const Web3Provider = ({ children }) => {
         setUserProfile(null);
         setIsRegistered(false);
         setUserStatus('unregistered');
+        // --- [FIX] RESTORING state clearing on logout ---
         setRecords([]);
         setRequests([]);
         setAccessList([]);
@@ -78,6 +86,7 @@ export const Web3Provider = ({ children }) => {
         setProvider(null);
         setKeyPair(null);
         setNeedsPublicKeySetup(false);
+        setIdToken(null); // [NEW] Clear the idToken on logout
     };
 
     const disconnectWallet = async () => {
@@ -91,7 +100,7 @@ export const Web3Provider = ({ children }) => {
         }
     };
     
-    // --- NETWORK SWITCHING ---
+    // --- NETWORK SWITCHING (UNCHANGED) ---
     const checkAndSwitchNetwork = async (currentProvider) => {
         if (!currentProvider) return false;
         try {
@@ -144,6 +153,7 @@ export const Web3Provider = ({ children }) => {
                     pendingReqs.push(req);
                 }
             }
+            // --- [FIX] RESTORING state update ---
             setRequests(pendingReqs);
         } catch (error) {
             console.error("Could not fetch access requests:", error);
@@ -156,6 +166,7 @@ export const Web3Provider = ({ children }) => {
             const recordIds = await contractInstance.getPatientRecordIds(patientAddress);
             const recordsPromises = recordIds.map(id => contractInstance.getRecordById(id));
             const fetchedRecords = await Promise.all(recordsPromises);
+            // --- [FIX] RESTORING state update ---
             setRecords(fetchedRecords);
             await fetchPendingRequests(patientAddress, contractInstance);
         } catch (error) {
@@ -163,11 +174,13 @@ export const Web3Provider = ({ children }) => {
         }
     }, [fetchPendingRequests]);
 
-    // --- [REFACTORED] SESSION SETUP & STATE CHECKING ---
+    // --- [REFACTORED] SESSION SETUP & STATE CHECKING (UNCHANGED) ---
+    // This function already uses fetch, which is fine. We just formalize the base URL.
     const checkUserRegistrationAndState = useCallback(async (userAddress, contractInstance, signerInstance) => {
         setIsLoadingProfile(true);
         try {
-            const response = await fetch(`http://localhost:3001/api/users/status/${userAddress}`);
+            // Using the new API_BASE_URL constant
+            const response = await fetch(`${API_BASE_URL}/api/users/status/${userAddress}`);
             if (!response.ok) {
                 throw new Error('Failed to fetch user status from the server.');
             }
@@ -245,7 +258,7 @@ export const Web3Provider = ({ children }) => {
     
             await contractInstance.owner();
     
-            setAccount(userAddress);
+            setAccount(userAddress); // [FIX] This is where 'account' is set
             setSigner(signerInstance);
             setContract(contractInstance);
             setOwner(await contractInstance.owner());
@@ -260,11 +273,13 @@ export const Web3Provider = ({ children }) => {
         }
     }, [checkUserRegistrationAndState]);
 
+    // This function for generating keys locally is still needed (UNCHANGED)
     const generateAndSetKeyPair = async () => {
         if (!signer) {
             toast.error("Signer not available. Cannot generate keys."); return;
         }
         try {
+            // [MODIFIED] Pass signer to generateAndStoreKeyPair
             const newKeyPair = await generateAndStoreKeyPair(signer);
             setKeyPair(newKeyPair);
             return newKeyPair;
@@ -274,27 +289,143 @@ export const Web3Provider = ({ children }) => {
         }
     };
 
-    const savePublicKeyOnChain = async () => {
-        if (!contract || !keyPair?.publicKey) {
-            toast.error("Contract or public key not available."); return;
+    // [REMOVED] The old `savePublicKeyOnChain` function is gone.
+    // It will be replaced by `api.savePublicKey` which components will call.
+
+    // --- [NEW] API SERVICE ---
+    
+    /**
+     * @brief A generic helper function for making authenticated API calls to the backend.
+     * It automatically includes the user's JWT (idToken) for authentication.
+     */
+    const apiFetch = async (endpoint, method = 'POST', body = null) => {
+        // [FIX] This is the key change for local testing.
+        // We will *only* check for an idToken if the app is *not* in a local dev
+        // environment, or we can just send the request without it.
+        // For your setup, we will just warn and send the request anyway.
+        // Your *backend* (with 'authenticate' commented out) will now allow it.
+        if (!idToken) {
+            console.warn(`Making API call without idToken. This is expected for MetaMask testing, but will fail if backend auth is enabled.`);
+            // toast.error("You are not authenticated. Please reconnect."); // [REMOVED]
+            // throw new Error("User not authenticated"); // [REMOVED]
         }
-        try {
-            const tx = await contract.savePublicKey(keyPair.publicKey);
-            const toastId = toast.loading("Saving your public key to the blockchain...");
-            await tx.wait();
-            toast.success("Security setup complete!", { id: toastId });
 
-            setUserProfile(prevProfile => ({
-                ...prevProfile,
-                publicKey: keyPair.publicKey,
-            }));
+        const headers = {
+            'Content-Type': 'application/json',
+        };
 
-            setNeedsPublicKeySetup(false); 
-        } catch (error) {
-            console.error("Error saving public key:", error);
-            toast.error("Failed to save public key.");
+        // [FIX] Only add the Authorization header if we actually have a token
+        if (idToken) {
+            headers['Authorization'] = `Bearer ${idToken}`;
+        }
+
+        const config = {
+            method,
+            headers,
+        };
+
+        if (body) {
+            config.body = JSON.stringify(body);
+        }
+
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ message: "An unknown API error occurred" }));
+            console.error("API Error Response:", errorData);
+            throw new Error(errorData.message || "API request failed");
+        }
+        
+        // Handle responses that might not have a JSON body (e.g., 204 No Content)
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+            return response.json();
+        } else {
+            return response.text(); // Or return null, or response.status
         }
     };
+
+    /**
+     * @brief The new API service object that will be exposed via context.
+     * It contains all functions that send sponsored (write) transactions to the backend.
+     */
+    const api = {
+        // --- User Registration & Profile ---
+        registerUser: (name, role, hospitalId) => {
+            // [FIX] Add userAddress: account to the body
+            return apiFetch('/api/users/sponsored/register-user', 'POST', { name, role, hospitalId, userAddress: account });
+        },
+        requestRegistration: (hospitalName) => {
+            // [FIX] Add userAddress: account to the body
+            return apiFetch('/api/users/sponsored/request-registration', 'POST', { hospitalName, userAddress: account });
+        },
+        savePublicKey: (publicKey, signature) => {
+            // [FIX] Add userAddress: account to the body
+            return apiFetch('/api/users/sponsored/save-public-key', 'POST', { publicKey, signature, userAddress: account });
+        },
+        updateUserProfile: (name) => {
+            // [FIX] Add userAddress: account to the body
+            return apiFetch('/api/users/sponsored/update-profile', 'POST', { name, userAddress: account });
+        },
+
+        // --- Record Management ---
+        addSelfUploadedRecord: (recordData) => {
+            // [FIX] Add userAddress: account to the body
+            return apiFetch('/api/users/sponsored/add-self-record', 'POST', { ...recordData, userAddress: account });
+        },
+        addVerifiedRecord: (recordData) => {
+            // [FIX] Add userAddress: account to the body
+            return apiFetch('/api/users/sponsored/add-verified-record', 'POST', { ...recordData, userAddress: account });
+        },
+        addSelfUploadedRecordsBatch: (records) => {
+            // [FIX] Add userAddress: account to the body
+            return apiFetch('/api/users/sponsored/add-self-records-batch', 'POST', { records, userAddress: account });
+        },
+        addVerifiedRecordsBatch: (records, patient) => { // [FIX] Added 'patient' from component
+            // [FIX] Add userAddress: account and patient to the body
+            return apiFetch('/api/users/sponsored/add-verified-records-batch', 'POST', { records, patient, userAddress: account });
+        },
+
+        // --- Access Control (Patient) ---
+        grantRecordAccess: (professionalAddress, recordIds) => {
+            // [FIX] Add userAddress: account to the body
+            return apiFetch('/api/users/sponsored/grant-access', 'POST', { professionalAddress, recordIds, userAddress: account });
+        },
+        grantMultipleRecordAccess: (professionals, recordIds) => {
+            // [FIX] Add userAddress: account to the body
+            return apiFetch('/api/users/sponsored/grant-multiple-access', 'POST', { professionals, recordIds, userAddress: account });
+        },
+        revokeRecordAccess: (professionalAddress, recordIds) => {
+            // [FIX] Add userAddress: account to the body
+            return apiFetch('/api/users/sponsored/revoke-access', 'POST', { professionalAddress, recordIds, userAddress: account });
+        },
+        revokeMultipleRecordAccess: (professionals, recordIds) => {
+            // [FIX] Add userAddress: account to the body
+            return apiFetch('/api/users/sponsored/revoke-multiple-access', 'POST', { professionals, recordIds, userAddress: account });
+        },
+        approveRequest: (requestId) => {
+             // [FIX] Add userAddress: account to the body (for insurance)
+            return apiFetch('/api/users/sponsored/approve-request-insurance', 'POST', { requestId, durationInDays: 30, userAddress: account }); // Default duration
+        },
+        
+        // --- Access Control (Professional) ---
+        requestRecordAccess: (patientAddress, recordIds, justification) => {
+            // [FIX] Add userAddress: account to the body
+            return apiFetch('/api/users/sponsored/request-access', 'POST', { patientAddress, recordIds, justification, userAddress: account });
+        },
+
+        // --- Super Admin ---
+        // [FIX] These do NOT need userAddress, they are auth'd by signature (Model 2)
+        grantSponsorRole: (address, signature) => {
+            return apiFetch('/api/super-admin/grant-sponsor', 'POST', { address, signature });
+        },
+        revokeSponsorRole: (address, signature) => {
+            return apiFetch('/api/super-admin/revoke-sponsor', 'POST', { address, signature });
+        },
+    };
+
+    // --- END NEW API SERVICE ---
+
     
     const addNotification = (message) => {
         setNotifications(prev => [{ id: Date.now() + Math.random(), message, timestamp: new Date(), read: false }, ...prev]);
@@ -311,18 +442,41 @@ export const Web3Provider = ({ children }) => {
                 web3auth.on(ADAPTER_EVENTS.CONNECTED, async (data) => {
                     setIsLoadingProfile(true);
                     const web3authProvider = web3auth.provider;
-                    if (!web3authProvider) return;
+                    if (!web3authProvider) {
+                        setIsLoadingProfile(false); 
+                        return;
+                    }
                     
                     setProvider(web3authProvider);
                     let isNetworkCorrect = true;
                     if (web3auth.connectedAdapterName !== "openlogin") {
                         isNetworkCorrect = await checkAndSwitchNetwork(web3authProvider);
                     }
+
                     if (isNetworkCorrect) {
+                        // [FIX] We *try* to get an idToken, but we no longer fail if it's missing.
+                        try {
+                            const userInfo = await web3auth.getUserInfo();
+                            if (userInfo && userInfo.idToken) {
+                                setIdToken(userInfo.idToken); // Set the state if it exists
+                                console.log("idToken successfully retrieved.");
+                            } else {
+                                // This is now a warning, not an error.
+                                console.warn("No idToken found. API calls for sponsored transactions will fail. This is expected for MetaMask / external wallet logins.");
+                                setIdToken(null); // Ensure it's null
+                            }
+                        } catch (authError) {
+                            console.warn("Could not get user info or idToken:", authError);
+                            setIdToken(null);
+                        }
+
+                        // [FIX] We proceed to set up the session REGARDLESS of whether we got a token.
+                        // This allows MetaMask (which has no token) to work for read operations.
                         const finalProvider = new ethers.BrowserProvider(web3authProvider);
                         const signerInstance = await finalProvider.getSigner();
                         const userAddress = await signerInstance.getAddress();
                         await setupUserSession(signerInstance, userAddress);
+
                     } else {
                         toast.error("Please connect to the Hardhat network to use the app.");
                         await disconnectWallet();
@@ -340,7 +494,7 @@ export const Web3Provider = ({ children }) => {
             }
         };
         initWeb3Auth();
-    }, [setupUserSession]);
+    }, [setupUserSession]); // setupUserSession is already memoized
     
     const connectWallet = async () => {
         if (!web3auth) {
@@ -358,7 +512,7 @@ export const Web3Provider = ({ children }) => {
         }
     };
     
-    // --- EVENT LISTENERS ---
+    // --- EVENT LISTENERS (UNCHANGED) ---
     useEffect(() => {
         if (contract && account) {
             const handleRecordAdded = async (recordId, patientAddress, category) => {
@@ -368,7 +522,8 @@ export const Web3Provider = ({ children }) => {
 
                     try {
                         const newRecord = await contract.getRecordById(recordId);
-                        setRecords(prevRecords => {
+                        // --- [FIX] RESTORING state update ---
+                        setRecords(prevRecords => { 
                             const recordExists = prevRecords.some(r => Number(r[0]) === Number(newRecord[0]));
                             if (recordExists) {
                                 return prevRecords;
@@ -392,6 +547,9 @@ export const Web3Provider = ({ children }) => {
             const handlePublicKeySaved = (userAddress) => {
                 if (userAddress.toLowerCase() === account.toLowerCase()) {
                     addNotification("Your encryption key was securely saved on-chain!");
+                    // [MODIFIED] Instead of just setting state, we refetch the profile
+                    // to ensure we get the public key from the backend.
+                    refetchUserProfile();
                 }
             };
 
@@ -419,22 +577,27 @@ export const Web3Provider = ({ children }) => {
                 contract.off('ProfessionalAccessRequested', handleProfessionalAccessRequested);
             };
         }
-    }, [contract, account, signer, fetchPatientData, checkUserRegistrationAndState]);
+    }, [contract, account, signer, fetchPatientData, checkUserRegistrationAndState, refetchUserProfile]);
 
 
     return (
-        <Web3Context.Provider value={{ theme,
+        <Web3Context.Provider value={{ 
+            theme,
             setTheme,
             signer, account, contract, owner, isRegistered, userProfile, userStatus,
-            records, requests, isLoadingProfile, notifications, keyPair, needsPublicKeySetup,
-            accessList,
+            // --- [FIX] RESTORING state to provider ---
+            records, requests, accessList,
+            isLoadingProfile, notifications, keyPair, needsPublicKeySetup,
             requestUpdateCount, // --- [NEW] Expose the update trigger state ---
-            connectWallet, disconnect: disconnectWallet, 
+            connectWallet, 
+            disconnect: disconnectWallet, 
             checkUserRegistration: () => checkUserRegistrationAndState(account, contract, signer),
             refetchUserProfile,
             markNotificationsAsRead,
             generateAndSetKeyPair,
-            savePublicKeyOnChain,
+            // [REMOVED] savePublicKeyOnChain is no longer provided
+            // [NEW] Expose the entire API service
+            api,
         }}>
             {children}
         </Web3Context.Provider>

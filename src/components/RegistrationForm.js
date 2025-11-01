@@ -32,7 +32,8 @@ const roles = [
 const professionalRoles = roles.filter(r => r.isProfessional).map(r => r.id);
 
 export default function RegistrationForm() {
-    const { contract, account, checkUserRegistration, userStatus } = useWeb3();
+    // [MODIFIED] Removed 'contract' and added 'api'
+    const { account, checkUserRegistration, userStatus, api } = useWeb3();
     const [name, setName] = useState('');
     const [selectedRole, setSelectedRole] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -47,8 +48,8 @@ export default function RegistrationForm() {
     const [showLeftArrow, setShowLeftArrow] = useState(false);
     const [showRightArrow, setShowRightArrow] = useState(true);
 
-     // --- 2. ADD MODAL STATE ---
-     const [modalState, setModalState] = useState({
+    // --- 2. ADD MODAL STATE ---
+    const [modalState, setModalState] = useState({
         isOpen: false,
         title: '',
         message: '',
@@ -168,11 +169,17 @@ export default function RegistrationForm() {
 
             if (isProfessional) {
                 toast.loading('Step 1/2: Creating on-chain identity...', { id: toastId });
-                if (!contract) { throw new Error('Contract not initialized.'); }
-                const onChainTx = await contract.registerUser(name, selectedRole);
-                await onChainTx.wait();
+                // [MODIFIED] Check for api service
+                if (!api) { throw new Error('API service not initialized.'); }
+                
+                // [MODIFIED] Call sponsored backend endpoint instead of direct contract call
+                await api.registerUser(name, selectedRole, selectedHospital);
+                // [REMOVED] const onChainTx = await contract.registerUser(name, selectedRole);
+                // [REMOVED] await onChainTx.wait();
+                
                 toast.success('On-chain identity created!', { id: toastId });
 
+                // [UNCHANGED] This off-chain fetch logic remains the same
                 toast.loading('Step 2/2: Submitting affiliation request...', { id: toastId });
                 const roleObject = roles.find(r => r.id === selectedRole);
                 if (!roleObject) {
@@ -199,11 +206,17 @@ export default function RegistrationForm() {
 
             } else { // Patient Registration
                 toast.loading('Step 1/2: Creating on-chain identity...', { id: toastId });
-                if (!contract) { throw new Error('Contract not initialized.'); }
-                const tx = await contract.registerUser(name, selectedRole);
-                await tx.wait();
+                // [MODIFIED] Check for api service
+                if (!api) { throw new Error('API service not initialized.'); }
+
+                // [MODIFIED] Call sponsored backend endpoint. Pass 0 for hospitalId for patients.
+                await api.registerUser(name, selectedRole, 0);
+                // [REMOVED] const tx = await contract.registerUser(name, selectedRole);
+                // [REMOVED] await tx.wait();
+
                 toast.success('On-chain identity created!', { id: toastId });
 
+                // [UNCHANGED] This off-chain fetch logic remains the same
                 toast.loading('Step 2/2: Setting up your account...', { id: toastId });
                 const response = await fetch('http://localhost:3001/api/users/register-patient', {
                     method: 'POST',
@@ -225,6 +238,7 @@ export default function RegistrationForm() {
 
         } catch (error) {
             console.error("Registration failed:", error);
+            // [MODIFIED] Use error.message which will now come from the apiFetch helper
             toast.error(error.message || "Registration failed.", { id: toastId });
         } finally {
             setIsLoading(false);
@@ -232,8 +246,8 @@ export default function RegistrationForm() {
         }
     };
 
-     // --- 4. MODIFY FORM SUBMISSION HANDLER ---
-     const handleSubmit = (e) => {
+    // --- 4. MODIFY FORM SUBMISSION HANDLER ---
+    const handleSubmit = (e) => {
         e.preventDefault();
         openConfirm(); // Open the confirmation modal instead of running logic directly
     };
@@ -277,7 +291,7 @@ export default function RegistrationForm() {
                     <HospitalRegistrationForm />
                 </div>
             ) : (
-                 // --- 6. POINT FORM ONSUBMIT TO THE NEW HANDLER ---
+                // --- 6. POINT FORM ONSUBMIT TO THE NEW HANDLER ---
                 <form onSubmit={handleSubmit} className="space-y-6 pt-4">
                     <div className="relative">
                         <svg className="w-6 h-6 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
@@ -318,7 +332,7 @@ export default function RegistrationForm() {
                 </form>
             )}
 
-             {/* --- 7. RENDER THE MODAL --- */}
+            {/* --- 7. RENDER THE MODAL --- */}
             <ConfirmationModal
                 isOpen={modalState.isOpen}
                 onClose={closeModal}

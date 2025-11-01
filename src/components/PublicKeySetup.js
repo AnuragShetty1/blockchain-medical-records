@@ -6,24 +6,42 @@ import { ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast'; // Import toast for local component error/loading handling
 
 const PublicKeySetup = () => {
-    // [CHANGE] Destructure generateAndSetKeyPair and keyPair, and add local loading state
-    const { savePublicKeyOnChain, userProfile, generateAndSetKeyPair, keyPair } = useWeb3();
+    // [MODIFIED] Destructure 'api' instead of 'savePublicKeyOnChain'
+    const { api, userProfile, generateAndSetKeyPair, keyPair, refetchUserProfile } = useWeb3();
     const [isLoading, setIsLoading] = React.useState(false);
 
     const handleSaveKey = async () => {
         setIsLoading(true);
+        const toastId = toast.loading("Securing account...");
         try {
-            // [FIX] If keys are not in memory, generate them first (which includes wallet signature)
-            if (!keyPair || !keyPair.privateKey) {
-                const generated = await generateAndSetKeyPair();
-                if (!generated) throw new Error("Key generation failed or was cancelled.");
+            let keysToSave = keyPair;
+
+            // If keys aren't in state (or are incomplete), generate them.
+            // This function handles the user's signature.
+            if (!keysToSave || !keysToSave.publicKey || !keysToSave.signature) {
+                toast.loading("Generating encryption keys... Please sign the message in your wallet.", { id: toastId });
+                keysToSave = await generateAndSetKeyPair();
+                
+                if (!keysToSave || !keysToSave.publicKey || !keysToSave.signature) {
+                    throw new Error("Key generation failed or was cancelled.");
+                }
             }
 
-            // Now trigger the save. The context will handle the state refresh upon success.
-            await savePublicKeyOnChain();
+            // [MODIFIED] Call the new sponsored API endpoint with the public key and signature
+            toast.loading("Saving your public key to the blockchain...", { id: toastId });
+            await api.savePublicKey(keysToSave.publicKey, keysToSave.signature);
+
+            // The context's 'handlePublicKeySaved' event listener will catch this,
+            // call refetchUserProfile(), and hide this component.
+            toast.success("Security setup complete!", { id: toastId });
+            
+            // We call refetchUserProfile() here just in case the event listener is slow,
+            // this ensures the UI updates immediately.
+            await refetchUserProfile();
+
         } catch (error) {
-            // Display error if anything fails during generation or saving
-            toast.error(error.message || "Failed to complete security setup.");
+            // Display error if anything fails
+            toast.error(error.message || "Failed to complete security setup.", { id: toastId });
             console.error("Setup failed:", error);
         } finally {
             setIsLoading(false);
@@ -46,7 +64,8 @@ const PublicKeySetup = () => {
                     {isLoading ? 'Processing...' : 'Secure My Account & Save Key'}
                 </button>
                 <p className="text-xs text-gray-500 mt-4">
-                    This is a blockchain transaction and will require a small amount of gas.
+                    {/* [MODIFIED] Updated text to reflect gas-less model */}
+                    This is a sponsored blockchain transaction. You do not need to pay any gas fees.
                 </p>
             </div>
         </div>
