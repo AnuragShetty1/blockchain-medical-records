@@ -172,7 +172,7 @@ const PatientSearchColumn = ({ onPatientSelect }) => {
                     <div className="divide-y divide-slate-100">
                         {searchResults.map((patient) => (
                             <button key={patient.address} onClick={() => onPatientSelect(patient)} className="w-full text-left p-3 hover:bg-emerald-50 rounded-md transition-colors flex items-center gap-3">
-                                <User className="w-5 h-5 text-slate-500 flex-shrink-0" />
+                                <User className="w-5 w-5 text-slate-500 flex-shrink-0" />
                                 <div className="min-w-0">
                                     <p className="font-medium text-slate-800 truncate">{patient.name}</p>
                                     <p className="text-xs text-slate-500 font-mono truncate">{patient.address}</p>
@@ -226,12 +226,14 @@ const UploadSection = () => {
     );
 };
 
+// --- [FIX APPLIED] ---
 const RequestAccessSection = () => {
-    const { contract } = useWeb3();
+    const { api } = useWeb3();
     const [patientProfile, setPatientProfile] = useState(null);
     const [patientRecords, setPatientRecords] = useState([]);
     const [isLoadingRecords, setIsLoadingRecords] = useState(false);
     const [selectedRecords, setSelectedRecords] = useState(new Set());
+    const [justification, setJustification] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     useEffect(() => {
@@ -260,19 +262,32 @@ const RequestAccessSection = () => {
         });
     };
     
+    // [MODIFIED] This function is now identical to doctorview.js
     const handleSubmitRequest = async () => {
         if (selectedRecords.size === 0) return toast.error("Please select at least one record.");
-        if (!contract || !patientProfile) return toast.error("Contract not loaded or patient not selected.");
+        if (!api || !patientProfile) return toast.error("API not loaded or patient not selected.");
+        if (!justification.trim()) return toast.error("A justification is required to request records.");
         
         setIsSubmitting(true);
-        const toastId = toast.loading("Submitting access request...");
+        const toastId = toast.loading("Submitting sponsored access request...");
         try {
-            const tx = await contract.requestRecordAccess(patientProfile.address, Array.from(selectedRecords));
-            await tx.wait();
+            // Pass the 'justification' as the third argument
+            const response = await api.requestRecordAccess(
+                patientProfile.address, 
+                Array.from(selectedRecords),
+                justification // <-- This was the missing piece
+            );
+            
+            // [NEW] Add success toast to dismiss the "Submitting" message
             toast.success("Access request submitted!", { id: toastId });
+
             setSelectedRecords(new Set());
+            setJustification('');
         } catch (error) {
-            toast.error(error?.data?.message || "An error occurred.", { id: toastId });
+            // [MODIFIED] Log error and show message
+            console.error("Failed to submit request:", error);
+            const errorMessage = error.response?.data?.message || error.message || "An error occurred.";
+            toast.error(errorMessage, { id: toastId });
         } finally {
             setIsSubmitting(false);
         }
@@ -300,7 +315,7 @@ const RequestAccessSection = () => {
                             {isLoadingRecords ? (
                                 <div className="flex justify-center items-center py-8"><Loader2 className="h-8 w-8 animate-spin text-slate-400" /></div>
                             ) : patientRecords.length > 0 ? (
-                                <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
+                                <div className="space-y-3 max-h-72 overflow-y-auto pr-2">
                                     {patientRecords.map(record => (
                                         <label key={record.recordId} className="flex items-center p-3 bg-slate-50 rounded-lg border border-slate-200 cursor-pointer hover:bg-emerald-50/50 hover:border-emerald-200 transition-colors">
                                             <input type="checkbox" checked={selectedRecords.has(record.recordId)} onChange={() => handleRecordSelect(record.recordId)} className="h-5 w-5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500" />
@@ -312,6 +327,24 @@ const RequestAccessSection = () => {
                             ) : (
                                 <p className="text-slate-500 text-center py-8">This patient has no records available to request.</p>
                             )}
+
+                            {/* --- Justification Textarea (unchanged) --- */}
+                            <div className="pt-6 mt-6 border-t border-slate-200">
+                                <label htmlFor="justification" className="block text-sm font-medium text-slate-700 mb-2">
+                                    Reason for Request (Required)
+                                </label>
+                                <textarea
+                                    id="justification"
+                                    rows="3"
+                                    value={justification}
+                                    onChange={(e) => setJustification(e.target.value)}
+                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+                                    placeholder="e.g., 'Requesting consultation for follow-up on recent lab results.'"
+                                    disabled={isSubmitting}
+                                ></textarea>
+                            </div>
+                            {/* --- [END OF NEW] --- */}
+
                              <div className="pt-6 mt-6 border-t border-slate-200">
                                 <button onClick={handleSubmitRequest} disabled={isSubmitting || selectedRecords.size === 0} className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 disabled:bg-slate-400 disabled:cursor-not-allowed transition-colors shadow-sm">
                                     {isSubmitting ? <><Loader2 className="h-5 w-5 animate-spin" /> Submitting...</> : <>Request Access to {selectedRecords.size} Record(s)</>}
@@ -330,6 +363,7 @@ const RequestAccessSection = () => {
         </div>
     );
 };
+// --- [END OF FIX] ---
 
 const ReviewSection = () => {
     const { account } = useWeb3();
@@ -406,3 +440,4 @@ const PatientRecordGroup = ({ patient, records }) => {
         </div>
     );
 };
+
