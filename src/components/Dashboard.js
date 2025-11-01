@@ -21,6 +21,8 @@ import InsuranceDashboard from "./InsuranceDashboard";
 // --- FIX ---
 // Import the new component that will be displayed to revoked users.
 import AccessRevoked from "./AccessRevoked";
+// [NEW] Import the DashboardSkeleton for the loading state
+import DashboardSkeleton from "./DashboardSkeleton"; 
 
 const DashboardIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>;
 const RecordsIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>;
@@ -32,7 +34,8 @@ const ProfileIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6
 
 
 export default function Dashboard() {
-    const { userProfile, records, requests, accessList, needsPublicKeySetup, userStatus, owner, account } = useWeb3();
+    // [MODIFIED] Destructure the new 'isConfirmingKey' state
+    const { userProfile, records, requests, accessList, needsPublicKeySetup, userStatus, owner, account, isConfirmingKey } = useWeb3();
     const [activeView, setActiveView] = useState('dashboard');
     const [greeting, setGreeting] = useState('Welcome');
 
@@ -43,10 +46,23 @@ export default function Dashboard() {
         else setGreeting('Good Evening');
     }, []);
 
-    // --- FIX ---
-    // The loading check is moved higher up. Previously, if userProfile was null (which it is for a revoked user),
-    // this component would return a "Loading..." message indefinitely. Now, it correctly allows the logic
-    // to proceed to the `switch (userStatus)` block, which can then handle the 'revoked' case.
+    // --- NEW LOADING STATE CHECK (Step 3 to eliminate flicker) ---
+    // If the user has just submitted their public key, show a dedicated loader.
+    // This blocks the flicker caused by the race condition.
+    if (isConfirmingKey) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-8 bg-slate-50">
+                <h2 className="text-3xl font-bold text-teal-600 mt-8 animate-pulse">Setting Up Your Secure Dashboard...</h2>
+                <p className="text-slate-500 mt-2">
+                    Waiting for blockchain confirmation. This is a one-time setup.
+                </p>
+                <DashboardSkeleton />
+            </div>
+        );
+    }
+    // --- END NEW LOADING STATE CHECK ---
+
+
     if (!userStatus) {
         return <div className="text-center p-10"><p>Loading user status...</p></div>;
     }
@@ -61,19 +77,13 @@ export default function Dashboard() {
         case 'rejected':
             return <HospitalRequestPending />;
 
-        // --- MISTAKE ---
-        // The original `switch` statement did not have a case for the 'revoked' status. This meant a
-        // revoked user would fall through to the `default` case and see a generic status message,
-        // rather than being explicitly blocked.
-        // --- FIX ---
-        // A new `case` is added for the 'revoked' status. This case now correctly renders the
-        // `AccessRevoked` component, which displays a clear message and a disconnect button,
-        // effectively blocking the user from proceeding further into the application.
         case 'revoked':
             return <AccessRevoked />;
 
         case 'approved':
             if (needsPublicKeySetup) {
+                // If needsPublicKeySetup is true, but isConfirmingKey is false (checked above),
+                // it means the user hasn't clicked the button yet or the process failed.
                 return <PublicKeySetup />;
             }
             // A check for userProfile is now necessary here, since we can reach this point with a null profile
@@ -207,4 +217,3 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
         </ul>
     );
 };
-

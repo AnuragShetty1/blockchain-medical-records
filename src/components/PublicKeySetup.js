@@ -6,13 +6,17 @@ import { ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast'; // Import toast for local component error/loading handling
 
 const PublicKeySetup = () => {
-    // [MODIFIED] Destructure 'api' instead of 'savePublicKeyOnChain'
-    const { api, userProfile, generateAndSetKeyPair, keyPair, refetchUserProfile } = useWeb3();
-    const [isLoading, setIsLoading] = React.useState(false);
+    // [MODIFIED] Destructure 'setIsConfirmingKey' from the context
+    const { api, userProfile, generateAndSetKeyPair, keyPair, refetchUserProfile, setIsConfirmingKey } = useWeb3();
+    const [isLoading, setIsLoading] = React.useState(false); // This is just for the button itself
 
     const handleSaveKey = async () => {
         setIsLoading(true);
+        // [NEW] Set the *global* "confirming" state to true.
+        // This will be used by the parent component to show a loading screen.
+        setIsConfirmingKey(true); 
         const toastId = toast.loading("Securing account...");
+        
         try {
             let keysToSave = keyPair;
 
@@ -28,22 +32,26 @@ const PublicKeySetup = () => {
             }
 
             // [MODIFIED] Call the new sponsored API endpoint with the public key and signature
-            toast.loading("Saving your public key to the blockchain...", { id: toastId });
+            toast.loading("Saving your public key to the blockchain... This may take a moment.", { id: toastId });
             await api.savePublicKey(keysToSave.publicKey, keysToSave.signature);
 
             // The context's 'handlePublicKeySaved' event listener will catch this,
-            // call refetchUserProfile(), and hide this component.
-            toast.success("Security setup complete!", { id: toastId });
+            // set isConfirmingKey(false), and hide this component.
+            toast.success("Security setup complete! Your dashboard is loading...", { id: toastId });
             
-            // We call refetchUserProfile() here just in case the event listener is slow,
-            // this ensures the UI updates immediately.
-            await refetchUserProfile();
+            // [REMOVED] Do not call refetchUserProfile() here.
+            // This is part of the race condition. The event listener
+            // in Web3Context is now the single source of truth for this.
+            // await refetchUserProfile();
 
         } catch (error) {
             // Display error if anything fails
             toast.error(error.message || "Failed to complete security setup.", { id: toastId });
             console.error("Setup failed:", error);
+            // [NEW] If the API call fails, we must reset the global loading state.
+            setIsConfirmingKey(false);
         } finally {
+            // This just re-enables the button if the user is still on this page (e.g., after an error)
             setIsLoading(false);
         }
     };
@@ -73,3 +81,4 @@ const PublicKeySetup = () => {
 };
 
 export default PublicKeySetup;
+

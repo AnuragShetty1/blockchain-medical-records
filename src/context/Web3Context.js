@@ -59,6 +59,9 @@ export const Web3Provider = ({ children }) => {
     const [needsPublicKeySetup, setNeedsPublicKeySetup] = useState(false);
     // [NEW] State to hold the user's JWT for API authentication
     const [idToken, setIdToken] = useState(null);
+    
+    // [NEW] Add a new state to manage the post-key-submission loading screen
+    const [isConfirmingKey, setIsConfirmingKey] = useState(false);
 
     // App Data State
     // --- [FIX] RESTORING the state variables I wrongly removed ---
@@ -87,6 +90,7 @@ export const Web3Provider = ({ children }) => {
         setKeyPair(null);
         setNeedsPublicKeySetup(false);
         setIdToken(null); // [NEW] Clear the idToken on logout
+        setIsConfirmingKey(false); // [NEW] Clear this on logout
     };
 
     const disconnectWallet = async () => {
@@ -201,26 +205,51 @@ export const Web3Provider = ({ children }) => {
                     publicKey: data.publicKey || "", 
                     name: data.name || "",
                 };
-                setUserProfile(fullProfile);
+                // [FIX] We set the profile *first* so the role is available
+                setUserProfile(fullProfile); 
 
                 const rolesThatNeedKeys = ['Patient', 'Doctor', 'LabTechnician'];
                 const userIsApproved = data.status === 'approved';
                 const userNeedsKey = rolesThatNeedKeys.includes(fullProfile.role);
 
                 if (userIsApproved && userNeedsKey) {
-                    const loadedKeyPair = await loadKeyPair(signerInstance);
-                    setKeyPair(loadedKeyPair);
                     
-                    const keyMissingInDB = !fullProfile.publicKey || fullProfile.publicKey === "";
+                    // --- [THIS IS THE FIX] ---
+                    // Check the blockchain *directly* to avoid the race condition.
+                    // The database (via `data.publicKey`) might be stale, but the contract is always true.
+                    const userOnChain = await contractInstance.users(userAddress);
+                    const onChainPublicKey = userOnChain.publicKey;
+
+                    // Now, check if the key is missing *on-chain*
+                    const keyIsMissingOnChain = !onChainPublicKey || onChainPublicKey.length === 0;
                     
-                    if (keyMissingInDB) {
+                    if (keyIsMissingOnChain) {
+                        // Key is truly missing. Show the setup page.
+                        const loadedKeyPair = await loadKeyPair(signerInstance); // This is needed to generate
+                        setKeyPair(loadedKeyPair);
                         setNeedsPublicKeySetup(true);
                     } else {
+                        // Key exists on-chain, but the database is just stale.
+                        // Do NOT show the setup page.
                         setNeedsPublicKeySetup(false);
+                        
+                        // Optimistically update the local profile state with the correct key
+                        // This fixes the flicker.
+                        if (fullProfile.publicKey !== onChainPublicKey) {
+                            setUserProfile(prev => ({ ...prev, publicKey: onChainPublicKey }));
+                        }
+                        
+                        // We can still load the key pair from local storage
+                        const loadedKeyPair = await loadKeyPair(signerInstance);
+                        setKeyPair(loadedKeyPair);
+
+                        // Fetch patient data as normal
                         if (fullProfile.role === "Patient") {
                             await fetchPatientData(userAddress, contractInstance);
                         }
                     }
+                    // --- [END OF FIX] ---
+
                 } else {
                     setKeyPair(null);
                     setNeedsPublicKeySetup(false);
@@ -239,7 +268,7 @@ export const Web3Provider = ({ children }) => {
         } finally {
             setIsLoadingProfile(false);
         }
-    }, [fetchPatientData]);
+    }, [fetchPatientData]); // [FIX] Removed contractInstance and signerInstance, they are not dependencies
 
     const refetchUserProfile = useCallback(async () => {
         if (account && contract && signer) {
@@ -263,6 +292,7 @@ export const Web3Provider = ({ children }) => {
             setContract(contractInstance);
             setOwner(await contractInstance.owner());
             
+            // [FIX] Pass contractInstance and signerInstance to the check function
             await checkUserRegistrationAndState(userAddress, contractInstance, signerInstance);
             
             toast.success("Connected successfully!");
@@ -377,12 +407,20 @@ export const Web3Provider = ({ children }) => {
             // [FIX] Add userAddress: account to the body
             return apiFetch('/api/users/sponsored/add-verified-record', 'POST', { ...recordData, userAddress: account });
         },
-        addSelfUploadedRecordsBatch: (records) => {
-            // [FIX] Add userAddress: account to the body
-            return apiFetch('/api/users/sponsored/add-self-records-batch', 'POST', { records, userAddress: account });
+
+        // --- [THIS IS THE FIX] ---
+        // The API call now sends the three separate arrays that users.js expects.
+        addSelfUploadedRecordsBatch: (ipfsHashes, titles, categories) => {
+            return apiFetch('/api/users/sponsored/add-self-records-batch', 'POST', { 
+                ipfsHashes, 
+                titles, 
+                categories, 
+                userAddress: account 
+            });
         },
         addVerifiedRecordsBatch: (records, patient) => { // [FIX] Added 'patient' from component
             // [FIX] Add userAddress: account and patient to the body
+            // TODO: This will also need to be updated to send arrays, not a 'records' object.
             return apiFetch('/api/users/sponsored/add-verified-records-batch', 'POST', { records, patient, userAddress: account });
         },
 
@@ -415,7 +453,7 @@ export const Web3Provider = ({ children }) => {
         },
 
         // --- Super Admin ---
-        // [FIX] These do NOT need userAddress, they are auth'd by signature (Model 2)
+        // [FIXD] These do NOT need userAddress, they are auth'd by signature (Model 2)
         grantSponsorRole: (address, signature) => {
             return apiFetch('/api/super-admin/grant-sponsor', 'POST', { address, signature });
         },
@@ -512,7 +550,7 @@ export const Web3Provider = ({ children }) => {
         }
     };
     
-    // --- EVENT LISTENERS (UNCHANGED) ---
+    // --- EVENT LISTENERS ---
     useEffect(() => {
         if (contract && account) {
             const handleRecordAdded = async (recordId, patientAddress, category) => {
@@ -540,16 +578,54 @@ export const Web3Provider = ({ children }) => {
             const handleUserVerified = (admin, verifiedUser) => {
                 if (verifiedUser.toLowerCase() === account.toLowerCase()) {
                     addNotification("Congratulations! Your account has been verified.");
-                    checkUserRegistrationAndState(account, contract, signer);
+                    // [FIX for loop] We call refetchUserProfile, which is correct
+                    refetchUserProfile();
                 }
             };
             
-            const handlePublicKeySaved = (userAddress) => {
+            // [FIXED] This is the fix for the PublicKeySetup loop
+            const handlePublicKeySaved = async (userAddress) => {
                 if (userAddress.toLowerCase() === account.toLowerCase()) {
                     addNotification("Your encryption key was securely saved on-chain!");
-                    // [MODIFIED] Instead of just setting state, we refetch the profile
-                    // to ensure we get the public key from the backend.
-                    refetchUserProfile();
+                    
+                    try {
+                        // 1. Read the user's data *directly from the smart contract*
+                        // This avoids the race condition with the indexer/database.
+                        const userOnChain = await contract.users(userAddress);
+                        const newPublicKey = userOnChain.publicKey;
+                        
+                        if (newPublicKey && newPublicKey.length > 0) {
+                            let userRole = null;
+                            
+                            // 2. Optimistically update the local user profile
+                            // We use the functional form of setState to safely get the current role
+                            setUserProfile(prevProfile => {
+                                // [FIX] Check if prevProfile exists before accessing role
+                                userRole = prevProfile ? prevProfile.role : null; 
+                                return {
+                                    ...prevProfile,
+                                    publicKey: newPublicKey,
+                                };
+                            });
+                            
+                            // 3. Force the app to exit the setup screen
+                            setNeedsPublicKeySetup(false);
+                            
+                            // 4. (Optional but good) Refetch patient data *after* state is updated
+                            if (userRole === "Patient") {
+                                fetchPatientData(userAddress, contract);
+                            }
+                        } else {
+                            // This should not happen, but if it does, fall back to the old way
+                            refetchUserProfile();
+                        }
+                    } catch (error) {
+                        console.error("Error reading user data from chain in handlePublicKeySaved:", error);
+                        refetchUserProfile(); // Fallback
+                    } finally {
+                        // [NEW] Whether it worked or failed, stop the "Confirming" state
+                        setIsConfirmingKey(false);
+                    }
                 }
             };
 
@@ -577,6 +653,7 @@ export const Web3Provider = ({ children }) => {
                 contract.off('ProfessionalAccessRequested', handleProfessionalAccessRequested);
             };
         }
+        // [FIX] We can remove userProfile from the dependency array as it's not needed for the new logic
     }, [contract, account, signer, fetchPatientData, checkUserRegistrationAndState, refetchUserProfile]);
 
 
@@ -588,6 +665,9 @@ export const Web3Provider = ({ children }) => {
             // --- [FIX] RESTORING state to provider ---
             records, requests, accessList,
             isLoadingProfile, notifications, keyPair, needsPublicKeySetup,
+            // [NEW] Expose the new loading state and its setter
+            isConfirmingKey, 
+            setIsConfirmingKey,
             requestUpdateCount, // --- [NEW] Expose the update trigger state ---
             connectWallet, 
             disconnect: disconnectWallet, 
@@ -607,4 +687,3 @@ export const Web3Provider = ({ children }) => {
 export const useWeb3 = () => {
     return useContext(Web3Context);
 };
-

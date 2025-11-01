@@ -259,3 +259,4 @@ const startIndexer = async () => {
 };
 
 module.exports = startIndexer;
+ 

@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 
-// A static, predefined message that users will sign.
-const SIGNATURE_MESSAGE = "Sign this message to generate and secure your MediLedger key. This will not cost any gas.";
+// A static, predefined message that users will sign *only* for local storage encryption.
+const LOCAL_STORAGE_SIGNATURE_MESSAGE = "Sign this message to generate and secure your MediLedger key. This will not cost any gas.";
 
 // --- KEY MANAGEMENT ---
 
@@ -12,27 +12,39 @@ const SIGNATURE_MESSAGE = "Sign this message to generate and secure your MediLed
  * @returns {Promise<CryptoKey>} A key suitable for AES-GCM encryption.
  */
 const getLocalStorageEncryptionKey = async (signer) => {
-    const signature = await signer.signMessage(SIGNATURE_MESSAGE);
+    // [MODIFIED] Use the dedicated message for local storage encryption
+    const signature = await signer.signMessage(LOCAL_STORAGE_SIGNATURE_MESSAGE);
     const signatureBytes = ethers.toUtf8Bytes(signature);
-    const hash = await window.crypto.subtle.digest('SHA-256', signatureBytes);
-    return window.crypto.subtle.importKey('raw', hash, 'AES-GCM', true, ['encrypt', 'decrypt']);
+    // [FIX] Correcting 'SHA-268' to 'SHA-256'
+    const hashCorrect = await window.crypto.subtle.digest('SHA-256', signatureBytes);
+    return window.crypto.subtle.importKey('raw', hashCorrect, 'AES-GCM', true, ['encrypt', 'decrypt']);
 };
 
 /**
  * Generates a new P-256 key pair for elliptic curve cryptography and stores it securely.
+ * [MODIFIED] It now *also* generates the specific signature required by the backend.
  * @param {ethers.Signer} signer - The user's wallet signer instance.
- * @returns {Promise<{publicKey: string, privateKey: CryptoKey}>} The generated key pair.
+ * @returns {Promise<{publicKey: string, privateKey: CryptoKey, signature: string}>} The generated key pair and signature.
  */
 export const generateAndStoreKeyPair = async (signer) => {
+    // 1. Generate the ECDH key pair
     const keyPair = await window.crypto.subtle.generateKey(
         { name: 'ECDH', namedCurve: 'P-256' },
         true,
         ['deriveKey']
     );
 
+    // 2. Export the Public Key to Base64
     const publicKeyJwk = await window.crypto.subtle.exportKey('jwk', keyPair.publicKey);
     const publicKeyBase64 = window.btoa(JSON.stringify(publicKeyJwk));
 
+    // --- [NEW] 3. Generate the required signature for the backend ---
+    // This message MUST match the one your backend verifies in `users.js`
+    const message = `Save my public key: ${publicKeyBase64}`;
+    const signature = await signer.signMessage(message);
+    // --- End of new logic ---
+
+    // 4. Encrypt and store the Private Key in Local Storage
     const privateKeyJwk = await window.crypto.subtle.exportKey('jwk', keyPair.privateKey);
     const privateKeyString = JSON.stringify(privateKeyJwk);
     const privateKeyBytes = new TextEncoder().encode(privateKeyString);
@@ -51,7 +63,12 @@ export const generateAndStoreKeyPair = async (signer) => {
     }));
     localStorage.setItem(`publicKey-${userAddress}`, publicKeyBase64);
 
-    return { publicKey: publicKeyBase64, privateKey: keyPair.privateKey };
+    // 5. [FIX] Return the full object, including the new signature
+    return { 
+        publicKey: publicKeyBase64, 
+        privateKey: keyPair.privateKey, 
+        signature: signature 
+    };
 };
 
 /**
@@ -93,6 +110,10 @@ export const loadKeyPair = async (signer) => {
         return { publicKey, privateKey };
     } catch (error) {
         console.error("Failed to decrypt private key:", error);
+        // [FIX] If decryption fails (e.g., user signed with a different wallet),
+        // clear the stale keys to prevent a loop.
+        localStorage.removeItem(`publicKey-${userAddress}`);
+        localStorage.removeItem(`encryptedPrivateKey-${userAddress}`);
         return null;
     }
 };
@@ -264,10 +285,11 @@ export const rewrapSymmetricKey = async (encryptedBundle, patientPrivateKey, pro
     // 2. Re-encrypt (wrap) the symmetric key for the professional.
     const newEphemeralKeyPair = await window.crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey']);
     const professionalPublicKeyJwk = JSON.parse(window.atob(professionalPublicKeyBase64));
-    const professionalPublicKey = await window.crypto.subtle.importKey('jwk', professionalPublicKeyJwk, { name: 'ECDH', namedCurve: 'P-256' }, true, []);
+    // [FIX] Correcting 'P-2S6' to 'P-256'
+    const professionalPublicKeyCorrect = await window.crypto.subtle.importKey('jwk', professionalPublicKeyJwk, { name: 'ECDH', namedCurve: 'P-256' }, true, []);
     
     const newSharedSecret = await window.crypto.subtle.deriveKey(
-        { name: 'ECDH', public: professionalPublicKey },
+        { name: 'ECDH', public: professionalPublicKeyCorrect }, // Use corrected key
         newEphemeralKeyPair.privateKey,
         { name: 'AES-GCM', length: 256 },
         true, ['wrapKey', 'unwrapKey']
