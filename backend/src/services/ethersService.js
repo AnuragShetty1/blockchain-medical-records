@@ -67,7 +67,7 @@ const getAdminAddress = async () => {
     if (!adminSigner) {
         init(); // Ensure signer is initialized if not already
         if (!adminSigner) { // Double check after init
-             throw new Error('Ethers service admin signer is not initialized.');
+            throw new Error('Ethers service admin signer is not initialized.');
         }
     }
     return adminSigner.address;
@@ -431,14 +431,27 @@ const addSelfUploadedRecordsBatch = async (patientAddress, ipfsHashes, titles, c
  * @param {Array<string>} ipfsHashes Array of IPFS hashes.
  * @param {Array<string>} titles Array of titles.
  * @param {Array<string>} categories Array of categories.
-Warning: The provided text is incomplete. Please provide the complete text to receive the full answer.
- * @param {Array<string>} encryptedKeysForPatient Array of encrypted keys for the patient.
- * @param {Array<string>} encryptedKeysForHospital Array of encrypted keys for the hospital.
+ * @param {Array<string>} encryptedKeysForPatient Array of encrypted keys for the patient (as JSON strings).
+ * @param {Array<string>} encryptedKeysForHospital Array of encrypted keys for the hospital (as JSON strings).
  */
 const addVerifiedRecordsBatch = async (professionalAddress, patient, ipfsHashes, titles, categories, encryptedKeysForPatient, encryptedKeysForHospital) => {
     if (!sponsorContract) throw new Error('Ethers service is not initialized.');
     try {
-        const tx = await sponsorContract.addVerifiedRecordsBatch(professionalAddress, patient, ipfsHashes, titles, categories, encryptedKeysForPatient, encryptedKeysForHospital);
+        // --- [THIS IS THE FIX] ---
+        // Convert the JSON strings back into bytes before sending to the contract.
+        const keysForPatientBytes = encryptedKeysForPatient.map(keyString => ethers.toUtf8Bytes(keyString));
+        const keysForHospitalBytes = encryptedKeysForHospital.map(keyString => ethers.toUtf8Bytes(keyString));
+        // --- [END OF FIX] ---
+
+        const tx = await sponsorContract.addVerifiedRecordsBatch(
+            professionalAddress, 
+            patient, 
+            ipfsHashes, 
+            titles, 
+            categories, 
+            keysForPatientBytes,  // Pass the converted bytes
+            keysForHospitalBytes  // Pass the converted bytes
+        );
         return tx;
     } catch (error) {
         logger.error(`Error in sponsored addVerifiedRecordsBatch call for ${professionalAddress}: ${error.message}`);
@@ -480,4 +493,3 @@ module.exports = {
     addSelfUploadedRecordsBatch,
     addVerifiedRecordsBatch,
 };
-

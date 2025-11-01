@@ -404,23 +404,26 @@ export const Web3Provider = ({ children }) => {
             return apiFetch('/api/users/sponsored/add-self-record', 'POST', { ...recordData, userAddress: account });
         },
         addVerifiedRecord: (recordData) => {
-            // [FIX] Add userAddress: account to the body
+            // [FIXm] Add userAddress: account to the body
             return apiFetch('/api/users/sponsored/add-verified-record', 'POST', { ...recordData, userAddress: account });
         },
 
-        // --- [THIS IS THE FIX] ---
-        // Based on the backend error, we are changing the function
-        // to accept a single 'records' array.
         addSelfUploadedRecordsBatch: ({ records }) => {
             return apiFetch('/api/users/sponsored/add-self-records-batch', 'POST', { 
                 records, // Pass the 'records' array
                 userAddress: account 
             });
         },
-        addVerifiedRecordsBatch: (records, patient) => { // [FIX] Added 'patient' from component
-            // [FIX] Add userAddress: account and patient to the body
-            // TODO: This will also need to be updated to send arrays, not a 'records' object.
-            return apiFetch('/api/users/sponsored/add-verified-records-batch', 'POST', { records, patient, userAddress: account });
+        
+        // --- [THIS IS THE FIX] ---
+        // This function now accepts the object { patient, records }
+        // from VerifiedUploadForm.js and sends it to the backend.
+        addVerifiedRecordsBatch: (batchData) => {
+            // batchData is { patient: "...", records: [...] }
+            return apiFetch('/api/users/sponsored/add-verified-records-batch', 'POST', { 
+                ...batchData, // This passes 'patient' and 'records' to the body
+                userAddress: account 
+            });
         },
 
         // --- Access Control (Patient) ---
