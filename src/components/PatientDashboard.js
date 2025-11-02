@@ -3,8 +3,25 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useWeb3 } from '@/context/Web3Context';
 import toast from 'react-hot-toast';
-import axios from 'axios'; // <-- NEW: Import axios for API calls
+import axios from 'axios';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+    LayoutDashboard,
+    FileText,
+    ShieldCheck,
+    Bell,
+    User,
+    Copy,
+    Info,
+    Upload,
+    Pointer,
+    Lock,
+    Users,
+    Activity,
+    Search
+} from 'lucide-react';
 
+// Corrected relative imports (removed .js)
 import UploadForm from "./UploadForm";
 import AccessManagement from "./AccessManagement";
 import RequestManager from "./RequestManager";
@@ -12,29 +29,17 @@ import Profile from "./Profile";
 import RecordList from "./RecordList";
 import DashboardSkeleton from './DashboardSkeleton';
 
-// --- ICONS (unchanged) ---
-const DashboardIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>;
-const RecordsIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>;
-const AccessIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>;
-const RequestsIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>;
-const CopyIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>;
-const UploadIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>;
-const ProfileIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>;
-const ChevronDownIcon = ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>;
-const InfoIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
-
-
 export default function PatientDashboard() {
-    // --- MODIFIED: `requests` from Web3Context is now aliased to `insuranceRequests` for clarity ---
     const { userProfile, account, records, requests: insuranceRequests, accessList, refetchUserProfile } = useWeb3();
-    const [activeView, setActiveView] = useState('dashboard');
+    const [activeTab, setActiveTab] = useState('overview');
     const [greeting, setGreeting] = useState('Welcome');
     const [searchQuery, setSearchQuery] = useState('');
-    const [isUploadFormVisible, setIsUploadFormVisible] = useState(false);
     
-    // --- NEW: State and fetching logic for professional requests is now managed here ---
+    // REMOVED: isUploadFormVisible state is no longer needed as it's in its own tab.
+    // const [isUploadFormVisible, setIsUploadFormVisible] = useState(false);
+
     const [professionalRequests, setProfessionalRequests] = useState([]);
-    
+
     const fetchProfessionalRequests = useCallback(async () => {
         if (!account) return;
         try {
@@ -44,21 +49,14 @@ export default function PatientDashboard() {
             }
         } catch (error) {
             console.error("Failed to fetch professional access requests:", error);
-            // Don't show toast on silent background fetch
         }
     }, [account]);
 
-    // --- NEW: useEffect for polling professional requests ---
     useEffect(() => {
-        fetchProfessionalRequests(); // Initial fetch
-        const intervalId = setInterval(fetchProfessionalRequests, 10000); // Poll every 10 seconds
-        return () => clearInterval(intervalId); // Cleanup on unmount
+        fetchProfessionalRequests();
+        const intervalId = setInterval(fetchProfessionalRequests, 10000);
+        return () => clearInterval(intervalId);
     }, [fetchProfessionalRequests]);
-
-
-    if (!userProfile) {
-        return <DashboardSkeleton />;
-    }
 
     useEffect(() => {
         const hour = new Date().getHours();
@@ -66,189 +64,329 @@ export default function PatientDashboard() {
         else if (hour < 18) setGreeting('Good Afternoon');
         else setGreeting('Good Evening');
     }, []);
-    
+
     const handleCopyAddress = () => {
-        navigator.clipboard.writeText(userProfile.walletAddress)
-            .then(() => toast.success('Address copied to clipboard!'))
-            .catch(() => toast.error('Failed to copy address.'));
+        if (!userProfile?.walletAddress) return;
+        // Use document.execCommand for reliability in iframe environments
+        try {
+            const tempInput = document.createElement('input');
+            tempInput.value = userProfile.walletAddress;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempInput);
+            toast.success('Address copied to clipboard!');
+        } catch (err) {
+            toast.error('Failed to copy address.');
+        }
     };
 
-    const handleViewChange = (view) => {
-        setActiveView(view);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+    const handleTabChange = (tab) => {
+        setActiveTab(tab);
     };
 
-    // --- MODIFIED: Calculation is now direct and always up-to-date ---
     const totalRequestCount = (insuranceRequests?.length || 0) + (professionalRequests?.length || 0);
 
-    const renderContent = () => {
-        switch (activeView) {
-            case 'dashboard':
-                return <DashboardOverview records={records || []} accessList={accessList || []} totalRequests={totalRequestCount} onNavigate={handleViewChange} />;
-            case 'records':
-                return (
-                    <div>
-                        <h2 className="text-3xl font-bold text-slate-800 mb-6">My Records</h2>
-                        <div className="bg-white rounded-2xl shadow-xl border border-slate-200 mb-8 overflow-hidden">
-                            <button
-                                onClick={() => setIsUploadFormVisible(!isUploadFormVisible)}
-                                className="w-full flex justify-between items-center p-6 text-left hover:bg-slate-50 transition-colors focus:outline-none"
-                            >
-                                <div className="flex items-center gap-3">
-                                    <div className="bg-teal-100 text-teal-700 p-2 rounded-lg"><UploadIcon /></div>
-                                    <h3 className="text-xl font-bold text-slate-800">Upload New Record</h3>
-                                </div>
-                                <ChevronDownIcon className={`w-6 h-6 text-slate-500 transition-transform duration-300 ${isUploadFormVisible ? 'rotate-180' : ''}`} />
-                            </button>
-                            <div className={`transition-all duration-500 ease-in-out ${isUploadFormVisible ? 'max-h-[1000px] opacity-100' : 'max-h-0 opacity-0'}`}>
-                                 <div className="border-t border-slate-200">
-                                    <div className="p-6 bg-slate-50/50">
-                                        <div className="p-4 mb-6 text-sm text-sky-800 rounded-lg bg-sky-50 flex items-start gap-3" role="alert">
-                                            <div className="flex-shrink-0 pt-0.5"><InfoIcon /></div>
-                                            <div>
-                                                <span className="font-bold">For Your Security:</span> All records are encrypted on your device before being uploaded. Only you and those you grant explicit permission to can view them.
-                                            </div>
-                                        </div>
-                                        <UploadForm />
-                                    </div>
-                                 </div>
-                            </div>
-                        </div>
-                        <div className="p-8 bg-white rounded-2xl shadow-xl border border-slate-200">
-                            <h3 className="text-2xl font-bold text-slate-800 mb-6">My Record History</h3>
-                            <input 
-                                type="text"
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                placeholder="Search records by title..."
-                                className="w-full px-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500 transition mb-6"
-                            />
-                            <RecordList searchQuery={searchQuery} />
-                        </div>
-                    </div>
-                );
+    if (!userProfile) {
+        return <DashboardSkeleton />;
+    }
+
+    const renderActiveTab = () => {
+        switch (activeTab) {
+            case 'overview':
+                return <DashboardOverview
+                    records={records || []}
+                    accessList={accessList || []}
+                    totalRequests={totalRequestCount}
+                />;
+            // MODIFIED: 'records' tab is now 'record-list'
+            case 'record-list':
+                return <RecordListTabContent
+                    searchQuery={searchQuery}
+                    setSearchQuery={setSearchQuery}
+                />;
+            // NEW: 'upload' tab
+            case 'upload':
+                return <UploadTabContent />;
             case 'access':
-                return <AccessManagement />;
+                return <AccessTabContent />;
             case 'requests':
                 return (
-                    <DashboardContentCard title="Pending Requests">
-                        {/* --- MODIFIED: Pass requests and the refetcher function as props --- */}
-                        <RequestManager 
+                    <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 md:p-8">
+                        <h2 className="text-3xl font-bold text-gray-900 mb-6">Pending Requests</h2>
+                        <RequestManager
                             professionalRequests={professionalRequests}
                             onRequestsUpdate={fetchProfessionalRequests}
                         />
-                    </DashboardContentCard>
+                    </div>
                 );
             case 'profile':
                 return (
-                    <DashboardContentCard title="My Profile">
+                    <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 md:p-8">
+                        <h2 className="text-3xl font-bold text-gray-900 mb-6">My Profile</h2>
                         <Profile onProfileUpdate={refetchUserProfile} />
-                    </DashboardContentCard>
+                    </div>
                 );
             default:
-                return <DashboardOverview records={records || []} accessList={accessList || []} totalRequests={totalRequestCount} onNavigate={handleViewChange} />;
+                return <DashboardOverview
+                    records={records || []}
+                    accessList={accessList || []}
+                    totalRequests={totalRequestCount}
+                />;
         }
     };
 
     return (
-        <div className="w-full bg-slate-100 flex items-start">
-            <aside className="w-64 bg-white p-6 border-r border-slate-200 flex-col hidden md:flex sticky top-24">
-                <div className="flex flex-col items-center text-center mb-8 pt-8">
-                    <h1 className="text-lg font-bold text-slate-800">{greeting},</h1>
-                    <p className="text-2xl font-bold text-teal-600 truncate w-full px-2">{userProfile.name}!</p>
-                    {userProfile.contactInfo && (
-                        <p className="text-sm text-slate-500 mt-1 truncate w-full px-2">{userProfile.contactInfo}</p>
-                    )}
-                </div>
-                <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg mb-8">
-                    <div className="flex justify-between items-center mb-2">
-                        <span className="font-semibold text-slate-700">Status</span>
-                        <span className={`px-2 py-1 text-xs font-bold rounded-full ${userProfile.isVerified ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                            {userProfile.isVerified ? "Verified" : "Not Verified"}
-                        </span>
-                    </div>
-                    <div className="text-sm text-slate-500">
-                        <p className="font-semibold text-slate-700">Wallet Address</p>
-                        <div className="flex items-center gap-2 mt-1">
-                            <p className="font-mono text-xs truncate">{userProfile.walletAddress}</p>
-                            <button onClick={handleCopyAddress} className="hover:text-teal-600 transition-colors"><CopyIcon /></button>
-                        </div>
-                    </div>
-                </div>
-                <nav className="flex flex-col space-y-2">
-                    <NavItem icon={<DashboardIcon />} label="Dashboard" active={activeView === 'dashboard'} onClick={() => handleViewChange('dashboard')} />
-                    <NavItem icon={<RecordsIcon />} label="My Records" active={activeView === 'records'} onClick={() => handleViewChange('records')} />
-                    <NavItem icon={<AccessIcon />} label="Access Management" active={activeView === 'access'} onClick={() => handleViewChange('access')} />
-                    {/* --- MODIFIED: `notificationCount` is now always accurate --- */}
-                    <NavItem icon={<RequestsIcon />} label="Pending Requests" active={activeView === 'requests'} onClick={() => handleViewChange('requests')} notificationCount={totalRequestCount} />
-                    <NavItem icon={<ProfileIcon />} label="My Profile" active={activeView === 'profile'} onClick={() => handleViewChange('profile')} />
-                </nav>
-            </aside>
-            <main className="flex-1 p-6 sm:p-8 lg:p-10">
-                {renderContent()}
-            </main>
+        <div className="min-h-screen bg-gray-50 p-6 md:p-10">
+            <div className="max-w-7xl mx-auto space-y-8">
+                <DashboardHeader
+                    userProfile={userProfile}
+                    greeting={greeting}
+                    onCopyAddress={handleCopyAddress}
+                    onNavigate={handleTabChange}
+                />
+                <TabNavigation
+                    activeTab={activeTab}
+                    onTabChange={handleTabChange}
+                    totalRequests={totalRequestCount}
+                />
+                <main>
+                    <AnimatePresence mode="wait">
+                        <motion.div
+                            key={activeTab}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            transition={{ duration: 0.2 }}
+                        >
+                            {renderActiveTab()}
+                        </motion.div>
+                    </AnimatePresence>
+                </main>
+            </div>
         </div>
     );
 }
 
-const DashboardContentCard = ({ title, children }) => (
-    <div className="p-8 bg-white rounded-2xl shadow-xl border border-slate-200">
-        <h2 className="text-3xl font-bold text-slate-800 mb-6">{title}</h2>
-        {children}
-    </div>
-);
-
-
-const NavItem = ({ icon, label, active, onClick, notificationCount = 0 }) => (
-    <button
-        onClick={onClick}
-        className={`flex items-center space-x-3 px-4 py-3 rounded-lg font-semibold transition-colors duration-200 w-full text-left ${active ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'
-            }`}
+const DashboardHeader = ({ userProfile, greeting, onCopyAddress, onNavigate }) => (
+    <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 md:p-8"
     >
-        {icon}
-        <span className="flex-1">{label}</span>
-        {notificationCount > 0 && (
-            <span className="bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
-                {notificationCount}
-            </span>
-        )}
-    </button>
-);
+        <div className="flex flex-col md:flex-row justify-between gap-6">
+            {/* Left Side: Greeting & Status */}
+            <div className="flex-1">
+                <h1 className="text-2xl md:text-3xl font-bold text-gray-900">{greeting}, {userProfile.name}!</h1>
+                <p className="text-lg text-gray-600 mt-1">Welcome to your personal health dashboard.</p>
+                
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-2 mt-4 max-w-md">
+                    <div className="flex justify-between items-center">
+                        <span className="font-semibold text-gray-700">Status</span>
+                        <span className={`px-3 py-1 text-xs font-bold rounded-full ${userProfile.isVerified ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                            {userProfile.isVerified ? "Verified" : "Not Verified"}
+                        </span>
+                    </div>
+                    <div className="text-sm text-gray-500">
+                        <p className="font-semibold text-gray-700">Wallet Address</p>
+                        <div className="flex items-center gap-2 mt-1">
+                            <p className="font-mono text-xs text-gray-600 truncate">{userProfile.walletAddress}</p>
+                            <button onClick={onCopyAddress} className="text-gray-500 hover:text-blue-600 transition-colors flex-shrink-0">
+                                <Copy className="h-4 w-4" />
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
-const DashboardOverview = ({ records, accessList, totalRequests, onNavigate }) => (
-    <div>
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
-             <h2 className="text-3xl font-bold text-slate-800">Dashboard Overview</h2>
-             <div className="flex space-x-2">
-                <button
-                    onClick={() => onNavigate('records')}
-                    className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white font-semibold rounded-lg shadow-md hover:bg-teal-700 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500"
-                >
-                    <UploadIcon />
-                    <span>Upload Record</span>
-                </button>
+            {/* Right Side: Quick Actions */}
+            <div className="md:w-64 flex-shrink-0">
+                <QuickActions onNavigate={onNavigate} />
             </div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            <StatCard title="Total Records" value={records?.length || 0} icon={<RecordsIcon />} />
-            <StatCard title="Active Permissions" value={accessList?.length || 0} icon={<AccessIcon />} />
-            <StatCard title="Pending Requests" value={totalRequests || 0} icon={<RequestsIcon />} highlight={(totalRequests || 0) > 0} />
-        </div>
+    </motion.div>
+);
 
-        <div className="mt-10 bg-white rounded-2xl shadow-xl border border-slate-200">
-            <h3 className="text-xl font-bold text-slate-800 p-6 border-b border-slate-200">Recent Activity</h3>
+const TabNavigation = ({ activeTab, onTabChange, totalRequests }) => {
+    const tabs = [
+        { name: 'Overview', key: 'overview', icon: LayoutDashboard },
+        // MODIFIED: Split 'My Records' into two tabs
+        { name: 'My Records', key: 'record-list', icon: FileText },
+        { name: 'Upload Record', key: 'upload', icon: Upload },
+        { name: 'Access Management', key: 'access', icon: ShieldCheck },
+        { name: 'Pending Requests', key: 'requests', icon: Bell },
+        { name: 'My Profile', key: 'profile', icon: User },
+    ];
+
+    return (
+        <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-2">
+            <nav className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-2 sm:space-y-0">
+                {tabs.map((tab) => (
+                    <button
+                        key={tab.key}
+                        onClick={() => onTabChange(tab.key)}
+                        className={`relative flex-1 flex justify-center items-center gap-2 px-4 py-3 text-sm font-semibold rounded-lg transition-colors ${activeTab === tab.key
+                            ? 'text-blue-700'
+                            : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                            }`}
+                    >
+                        <tab.icon className="h-5 w-5" />
+                        <span>{tab.name}</span>
+                        {tab.key === 'requests' && totalRequests > 0 && (
+                            <span className="absolute top-1 right-1 h-5 w-5 bg-red-600 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                                {totalRequests}
+                            </span>
+                        )}
+                        {activeTab === tab.key && (
+                            <motion.div
+                                layoutId="activeTabIndicator"
+                                className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600 rounded-full"
+                            />
+                        )}
+                    </button>
+                ))}
+            </nav>
+        </div>
+    );
+};
+
+const DashboardOverview = ({ records, accessList, totalRequests }) => (
+    <div className="space-y-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <StatCard title="Total Records" value={records?.length || 0} icon={<FileText className="text-blue-600" />} />
+            <StatCard title="Active Permissions" value={accessList?.length || 0} icon={<ShieldCheck className="text-green-600" />} />
+            <StatCard
+                title="Pending Requests"
+                value={totalRequests || 0}
+                icon={<Bell className={totalRequests > 0 ? "text-red-600" : "text-gray-500"} />}
+                highlight={totalRequests > 0}
+            />
+        </div>
+        <div className="grid grid-cols-1 gap-6">
             <RecentActivityFeed records={records || []} accessList={accessList || []} requests={[]} />
         </div>
     </div>
 );
 
 const StatCard = ({ title, value, icon, highlight = false }) => (
-    <div className={`p-6 rounded-2xl shadow-xl border ${highlight ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
-        <div className="flex items-center justify-between">
-            <p className={`text-sm font-medium ${highlight ? 'text-amber-800' : 'text-slate-500'}`}>{title}</p>
-            <div className={`${highlight ? 'text-amber-600' : 'text-slate-400'}`}>{icon}</div>
+    <motion.div
+        whileHover={{ scale: 1.03 }}
+        className={`p-6 rounded-2xl shadow-xl border ${highlight ? 'bg-red-50 border-red-200' : 'bg-white border-gray-100'}`}
+    >
+        <div className="flex items-center gap-4">
+            <div className={`p-3 rounded-lg ${highlight ? 'bg-red-100' : 'bg-gray-100'}`}>
+                {icon}
+            </div>
+            <div>
+                <p className={`text-sm font-medium ${highlight ? 'text-red-800' : 'text-gray-600'}`}>{title}</p>
+                <p className={`text-3xl font-bold ${highlight ? 'text-red-900' : 'text-gray-900'}`}>{value}</p>
+            </div>
         </div>
-        <p className={`text-4xl font-bold mt-2 ${highlight ? 'text-amber-900' : 'text-slate-800'}`}>{value}</p>
+    </motion.div>
+);
+
+const QuickActions = ({ onNavigate }) => (
+    <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 space-y-3">
+        <h3 className="text-lg font-bold text-gray-900 mb-1">Quick Actions</h3>
+        <button
+            // MODIFIED: Point to the new 'upload' tab
+            onClick={() => onNavigate('upload')}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-lg hover:bg-blue-700 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+        >
+            <Upload className="h-5 w-5" />
+            <span>Upload Record</span>
+        </button>
+        <button
+            onClick={() => onNavigate('access')}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-700 text-white font-semibold rounded-lg shadow-lg hover:bg-gray-800 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-600"
+        >
+            <Pointer className="h-5 w-5" />
+            <span>Grant Access</span>
+        </button>
+    </div>
+);
+
+// REMOVED: RecordsTabContent component is split into two new components below.
+
+// NEW: Component for the "Upload Record" tab
+const UploadTabContent = () => (
+    <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden p-6 md:p-8">
+        <div className="flex items-center gap-3 mb-6">
+            <div className="bg-blue-100 text-blue-700 p-3 rounded-lg">
+                <Upload className="h-6 w-6" />
+            </div>
+            <div>
+                <h3 className="text-2xl font-bold text-gray-900">Upload New Record</h3>
+                <p className="text-gray-600">Add a new document to your encrypted health profile.</p>
+            </div>
+        </div>
+        
+        <div className="p-6 bg-gray-50/50 rounded-lg border border-gray-200">
+            <div className="p-4 mb-6 text-sm text-blue-800 rounded-lg bg-blue-50 flex items-start gap-3" role="alert">
+                <div className="flex-shrink-0 pt-0.5"><Info className="h-5 w-5" /></div>
+                <div>
+                    <span className="font-bold">For Your Security:</span> All records are encrypted on your device before being uploaded. Only you and those you grant explicit permission to can view them.
+                </div>
+            </div>
+            <UploadForm />
+        </div>
+    </div>
+);
+
+// NEW: Component for the "My Records" (list) tab
+const RecordListTabContent = ({ searchQuery, setSearchQuery }) => (
+    <div className="p-6 md:p-8 bg-white rounded-2xl shadow-xl border border-gray-100">
+        <h3 className="text-2xl font-bold text-gray-900 mb-6">My Record History</h3>
+        <div className="relative">
+            <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search records by title, type, or provider..."
+                className="w-full px-4 py-3 pl-10 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 transition"
+            />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+        </div>
+        <div className="mt-6">
+            <RecordList searchQuery={searchQuery} />
+        </div>
+    </div>
+);
+
+
+const AccessTabContent = () => (
+    <div className="space-y-8">
+        <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 space-y-4">
+            <div className="flex items-center gap-3">
+                <div className="p-3 bg-blue-100 text-blue-700 rounded-lg">
+                    <Info className="h-6 w-6" />
+                </div>
+                <h3 className="text-xl font-bold text-gray-900">How It Works</h3>
+            </div>
+            <p className="text-sm text-gray-600">
+                You are in complete control. Your records are end-to-end encrypted. Granting access creates a temporary, on-chain permission for a *specific* provider.
+            </p>
+            <ul className="space-y-2 text-sm">
+                <li className="flex items-center gap-2">
+                    <Lock className="h-4 w-4 text-green-600 flex-shrink-0" />
+                    <span>Only providers you approve can see your data.</span>
+                </li>
+                <li className="flex items-center gap-2">
+                    <Users className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                    <span>You can revoke access at any time, instantly.</span>
+                </li>
+                <li className="flex items-center gap-2">
+                    <Activity className="h-4 w-4 text-purple-600 flex-shrink-0" />
+                    <span>Every action is logged on the blockchain for full transparency.</span>
+                </li>
+            </ul>
+        </div>
+        
+        <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 md:p-8">
+            <h2 className="text-3xl font-bold text-gray-900 mb-6">Manage Provider Access</h2>
+            <AccessManagement />
+        </div>
     </div>
 );
 
@@ -258,29 +396,29 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
     useEffect(() => {
         const recordActivities = (records || []).map(r => ({
             type: 'Record Added',
-            description: `New record uploaded.`,
+            description: r.title || `New record uploaded.`,
             timestamp: Number(r.timestamp) * 1000,
-            icon: <UploadIcon />,
-            color: 'text-sky-500',
-            bgColor: 'bg-sky-50'
+            icon: Upload,
+            color: 'text-blue-600',
+            bgColor: 'bg-blue-50'
         }));
 
         const accessActivities = (accessList || []).map((user, index) => ({
             type: 'Access Granted',
             description: `Access granted to ${user.name || 'a provider'}.`,
-            timestamp: Date.now() - index * 10000,
-            icon: <AccessIcon />,
-            color: 'text-green-500',
+            timestamp: Date.now() - index * 100000, // Faked for demo
+            icon: ShieldCheck,
+            color: 'text-green-600',
             bgColor: 'bg-green-50'
         }));
 
         const requestActivities = (requests || []).map((req, index) => ({
             type: 'Request Received',
             description: `Access request from ${req.requestor}.`,
-            timestamp: Date.now() - index * 10000,
-            icon: <RequestsIcon />,
-            color: 'text-amber-500',
-            bgColor: 'bg-amber-50'
+            timestamp: Date.now() - index * 100000, // Faked for demo
+            icon: Bell,
+            color: 'text-yellow-600',
+            bgColor: 'bg-yellow-50'
         }));
 
         const allActivities = [...recordActivities, ...accessActivities, ...requestActivities];
@@ -289,27 +427,33 @@ const RecentActivityFeed = ({ records, accessList, requests }) => {
         setActivity(allActivities.slice(0, 5));
     }, [records, accessList, requests]);
 
-    if (activity.length === 0) {
-        return <p className="p-6 text-slate-500">No recent activity to display.</p>;
-    }
-
     return (
-        <ul className="divide-y divide-slate-200">
-            {activity.map((item, index) => (
-                <li key={index} className="flex items-center p-4 space-x-4 hover:bg-slate-50">
-                    <div className={`p-2 rounded-full ${item.bgColor} ${item.color}`}>
-                        {item.icon}
-                    </div>
-                    <div className="flex-1">
-                        <p className="font-semibold text-slate-800">{item.type}</p>
-                        <p className="text-sm text-slate-600">{item.description}</p>
-                    </div>
-                    <p className="text-xs text-slate-400">
-                        {new Date(item.timestamp).toLocaleDateString()}
-                    </p>
-                </li>
-            ))}
-        </ul>
+        <div className="bg-white rounded-2xl shadow-xl border border-gray-100">
+            <h3 className="text-xl font-bold text-gray-900 p-6 border-b border-gray-200">Recent Activity</h3>
+            {activity.length === 0 ? (
+                <p className="p-6 text-gray-500">No recent activity to display.</p>
+            ) : (
+                <ul className="divide-y divide-gray-200">
+                    {activity.map((item, index) => {
+                        const Icon = item.icon;
+                        return (
+                            <li key={index} className="flex items-center p-4 space-x-4 hover:bg-gray-50 transition-colors">
+                                <div className={`p-3 rounded-full ${item.bgColor} ${item.color}`}>
+                                    <Icon className="h-5 w-5" />
+                                </div>
+                                <div className="flex-1">
+                                    <p className="font-semibold text-gray-800">{item.type}</p>
+                                    <p className="text-sm text-gray-600">{item.description}</p>
+                                </div>
+                                <p className="text-xs text-gray-400">
+                                    {new Date(item.timestamp).toLocaleDateString()}
+                                </p>
+                            </li>
+                        );
+                    })}
+                </ul>
+            )}
+        </div>
     );
 };
 
