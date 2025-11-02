@@ -1,27 +1,42 @@
 "use client";
 import { useState } from 'react';
-import { useWeb3 } from '@/context/Web3Context';
 import toast from 'react-hot-toast';
 import axios from 'axios';
 import AccessManager from './AccessManager';
-import ConfirmationModal from './ConfirmationModal'; // <-- 1. IMPORT MODAL
+import ConfirmationModal from './ConfirmationModal';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Stethoscope, MailOpen, Loader2, Check, X } from 'lucide-react';
 
-// --- ICONS (unchanged) ---
-const Spinner = () => <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-slate-500"></div>;
-const ApproveIcon = () => <svg className="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>;
-const RejectIcon = () => <svg className="w-4 h-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>;
-const MailOpenIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>;
+// --- ANIMATION VARIANTS (from theme) ---
+const gridVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+        opacity: 1,
+        transition: {
+            staggerChildren: 0.05,
+        },
+    },
+};
+
+const cardVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: (i) => ({
+        opacity: 1,
+        y: 0,
+        transition: {
+            delay: i * 0.05,
+        },
+    }),
+};
 
 
-// --- MODIFIED: Component now receives props from the dashboard ---
 export default function RequestManager({ professionalRequests, onRequestsUpdate }) {
-    const { contract, account, requests: insuranceRequests, fetchPendingRequests } = useWeb3();
-    const [durations, setDurations] = useState({});
+    // --- STATE (Simplified) ---
     const [isAccessManagerOpen, setIsAccessManagerOpen] = useState(false);
     const [selectedRequestForApproval, setSelectedRequestForApproval] = useState(null);
     const [processingId, setProcessingId] = useState(null);
 
-    // --- 2. ADD MODAL STATE (unchanged) ---
+    // --- MODAL STATE (Unchanged) ---
     const [modalState, setModalState] = useState({
         isOpen: false,
         title: '',
@@ -31,119 +46,63 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
         confirmColor: 'bg-indigo-600',
     });
 
-    // Function to close the modal (respecting the loading state) (unchanged)
     const closeModal = () => {
-        if (processingId) return; // Use existing loading state
+        if (processingId) return;
         setModalState({ ...modalState, isOpen: false });
     };
 
-    // Function to open the modal (currently only for reject) (unchanged)
+    // --- CONFIRM MODAL (Simplified) ---
     const openConfirm = (actionType, item) => {
         if (actionType === 'reject') {
             setModalState({
                 isOpen: true,
                 title: 'Reject Request',
                 message: `Are you sure you want to reject the access request from ${item.professional}? This action cannot be undone.`,
-                // [MODIFIED] Pass 'undefined' for the 'grants' argument
                 onConfirm: () => handleProfessionalResponse(item.requestId, 'rejected', undefined),
                 confirmText: 'Reject',
                 confirmColor: 'bg-red-600'
             });
         }
-        // Add cases for 'approveInsurance' if needed later
-    };
-    // --- END OF MODAL STATE ---
-
-
-    // (This function is for the *other* workflow - unchanged)
-    const handleDurationChange = (requestId, value) => {
-        setDurations(prev => ({ ...prev, [requestId]: value }));
     };
 
-    // (This function is for the *other* workflow - unchanged)
-    const handleApproveInsurance = async (requestId) => {
-        if (!contract || !account) return;
-        setProcessingId(`ins-${requestId}`);
-        const duration = durations[requestId] || 30;
-        const toastId = toast.loading(`Approving request for ${duration} days...`);
-        try {
-            const tx = await contract.approveRequest(requestId, duration);
-            await tx.wait();
-            toast.success('Request approved!', { id: toastId });
-            fetchPendingRequests(account, contract); // This is for insurance requests from Web3Context
-        } catch (error) {
-            console.error("Failed to approve request:", error);
-            toast.error('Failed to approve request.', { id: toastId });
-        } finally {
-            setProcessingId(null);
-            // closeModal(); // Close if confirmation added later
-        }
-    };
-
-    // --- [START OF FINAL FIX] ---
-
-    /**
-     * @param {number} requestId - The ID of the professional request.
-     * @param {'approved' | 'rejected'} response - The response.
-     * @param {Array} [grants] - (Optional) The array of grant objects from AccessManager.
-     */
+    // --- PROFESSIONAL REQUEST LOGIC (Unchanged) ---
     const handleProfessionalResponse = async (requestId, response, grants) => {
-        // [MODIFIED] This function now accepts the 'grants' array
-        
         setProcessingId(requestId);
         const toastId = toast.loading(`Processing your response...`);
         try {
-            // [MODIFIED] Create the payload dynamically
             const payload = { requestId, response };
             if (response === 'approved' && grants) {
                 payload.grants = grants;
             }
 
-            // [MODIFIED] Send the new payload
             await axios.post('http://localhost:3001/api/users/access-requests/respond', payload);
-            
+
             toast.success(`Request successfully ${response}!`, { id: toastId });
-            onRequestsUpdate(); // --- MODIFIED: Call the prop to trigger a refetch in the parent
+            onRequestsUpdate();
         } catch (error) {
             console.error(`Failed to ${response} request:`, error);
-            // [MODIFIED] Provide a more specific error if the backend rejected it (400)
             const apiErrorMessage = error.response?.data?.message;
             toast.error(apiErrorMessage || `Failed to ${response} request.`, { id: toastId });
         } finally {
             setProcessingId(null);
-            closeModal(); // Close modal on completion
+            closeModal();
         }
     };
 
     const handleApproveProfessionalClick = (request) => {
-        // (This part is unchanged)
         setSelectedRequestForApproval(request);
         setIsAccessManagerOpen(true);
     };
 
-    /**
-     * @param {Array} grants - The grants array passed back from AccessManager.
-     */
     const onGrantSuccess = (grants) => {
-        // [MODIFIED] This function now receives the 'grants' array
-        
         if (selectedRequestForApproval) {
-            // [MODIFIED] Pass the received 'grants' array to the API handler
-             handleProfessionalResponse(selectedRequestForApproval.requestId, 'approved', grants);
+            handleProfessionalResponse(selectedRequestForApproval.requestId, 'approved', grants);
         }
         setIsAccessManagerOpen(false);
         setSelectedRequestForApproval(null);
     };
 
-    // --- [END OF FINAL FIX] ---
-
-
-    const combinedRequests = [
-        ...(professionalRequests || []).map(r => ({ ...r, type: 'Professional' })),
-        ...(insuranceRequests || []).map(r => ({ ...r, type: 'Insurance', requestId: `ins-${Number(r.id)}` }))
-    ].sort((a, b) => new Date(b.createdAt || b.timestamp) - new Date(a.createdAt || a.timestamp));
-
-
+    // --- RENDER LOGIC ---
     return (
         <div className="space-y-8">
             {isAccessManagerOpen && selectedRequestForApproval && (
@@ -155,101 +114,39 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
                         address: selectedRequestForApproval.professionalAddress
                     }}
                     preselectedRecords={selectedRequestForApproval.requestedRecords}
-                    onGrantSuccess={onGrantSuccess} // This prop now passes 'grants' to our onGrantSuccess function
+                    onGrantSuccess={onGrantSuccess}
                 />
             )}
 
-            <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left text-slate-500">
-                        <thead className="text-xs text-slate-700 uppercase bg-slate-50">
-                            <tr>
-                                <th scope="col" className="px-6 py-4">Requester</th>
-                                <th scope="col" className="px-6 py-4">Type</th>
-                                <th scope="col" className="px-6 py-4">Details</th>
-                                <th scope="col" className="px-6 py-4 text-center">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {combinedRequests.length === 0 ? (
-                                <tr>
-                                    <td colSpan="4" className="text-center p-12">
-                                        <MailOpenIcon />
-                                        <p className="font-semibold text-slate-600 mt-4">No Pending Requests</p>
-                                        <p className="text-sm text-slate-500 mt-1">
-                                            You're all caught up!
-                                        </p>
-                                    </td>
-                                </tr>
-                            ) : (
-                                combinedRequests.map((req) => (
-                                    <tr key={req.requestId} className="bg-white border-b hover:bg-slate-50 transition-colors">
-                                        <td className="px-6 py-4">
-                                            <div className="font-semibold text-slate-900">{req.professional || 'Insurance Provider'}</div>
-                                            <div className="font-mono text-xs text-slate-400 mt-1">{req.professionalAddress || req.provider}</div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <span className={`inline-block px-2 py-1 text-xs font-semibold rounded-full ${req.type === 'Professional' ? 'bg-sky-100 text-sky-800' : 'bg-indigo-100 text-indigo-800'}`}>
-                                                {req.type}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            {req.type === 'Professional' ? (
-                                                <ul className="list-disc list-inside space-y-1 text-xs">
-                                                     {/* Ensure requestedRecords is always an array */}
-                                                     {(req.requestedRecords || []).map(rec => <li key={rec.recordId}>- {rec.title}</li>)}
-                                                </ul>
-                                            ) : (
-                                                <div className="text-xs"><strong>Claim ID:</strong> {req.claimId}</div>
-                                            )}
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            {req.type === 'Professional' ? (
-                                                <div className="flex items-center justify-center gap-2">
-                                                    <button
-                                                        onClick={() => openConfirm('reject', req)} // <-- 3. MODIFY ONCLICK (unchanged)
-                                                        disabled={processingId === req.requestId}
-                                                        className="px-3 py-1.5 text-xs font-semibold bg-red-100 text-red-700 rounded-md hover:bg-red-200 disabled:opacity-50 inline-flex items-center"
-                                                    >
-                                                        <RejectIcon /> Reject
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleApproveProfessionalClick(req)} // (unchanged)
-                                                        disabled={processingId === req.requestId}
-                                                        className="px-3 py-1.5 text-xs font-semibold bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 inline-flex items-center"
-                                                    >
-                                                        <ApproveIcon /> Approve
-                                                    </button>
-                                                </div>
-                                            ) : (
-                                                <div className="flex items-center justify-center gap-2">
-                                                    <input
-                                                        type="number"
-                                                        min="1"
-                                                        placeholder="Days"
-                                                        onChange={(e) => handleDurationChange(Number(req.id), e.target.value)}
-                                                        className="w-20 px-2 py-1 text-xs border border-slate-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                                                    />
-                                                    <button
-                                                        // TODO: Add confirmation for insurance approval if desired
-                                                        onClick={() => handleApproveInsurance(Number(req.id))}
-                                                        disabled={processingId === `ins-${Number(req.id)}`}
-                                                        className="px-3 py-1.5 text-xs font-semibold bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 inline-flex items-center"
-                                                    >
-                                                        {processingId === `ins-${Number(req.id)}` ? <Spinner/> : <><ApproveIcon /><span>Approve</span></>}
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </td>
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+            {/* --- REFACTORED: Main Content Grid --- */}
+            <AnimatePresence>
+                {/* professionalRequests prop is null while parent fetches */}
+                {!professionalRequests ? (
+                    <RequestGridSkeleton />
+                ) : professionalRequests.length === 0 ? (
+                    <EmptyState />
+                ) : (
+                    <motion.div
+                        className="grid grid-cols-1 md:grid-cols-2 gap-6"
+                        variants={gridVariants}
+                        initial="hidden"
+                        animate="visible"
+                    >
+                        {professionalRequests.map((req, index) => (
+                            <RequestCard
+                                key={req.requestId}
+                                request={req}
+                                isLoading={processingId === req.requestId}
+                                onReject={() => openConfirm('reject', req)}
+                                onApprove={() => handleApproveProfessionalClick(req)}
+                                customIndex={index}
+                            />
+                        ))}
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
-            {/* --- 4. RENDER THE MODAL (unchanged) --- */}
+            {/* --- RENDER THE MODAL (Unchanged) --- */}
             <ConfirmationModal
                 isOpen={modalState.isOpen}
                 onClose={closeModal}
@@ -258,8 +155,123 @@ export default function RequestManager({ professionalRequests, onRequestsUpdate 
                 message={modalState.message}
                 confirmText={modalState.confirmText}
                 confirmColor={modalState.confirmColor}
-                isLoading={processingId !== null} // Tie loading to existing state
+                isLoading={processingId !== null}
             />
         </div>
     );
 }
+
+// --- NEW: Request Card Component ---
+const RequestCard = ({ request, isLoading, onReject, onApprove, customIndex }) => {
+    return (
+        <motion.div
+            variants={cardVariants}
+            custom={customIndex}
+            whileHover={{ scale: 1.03 }}
+            className="flex flex-col justify-between bg-white rounded-2xl shadow-xl border border-gray-100 p-5 transition-all duration-300"
+        >
+            <div>
+                {/* Card Header */}
+                <div className="flex justify-between items-start gap-4">
+                    <div className="flex items-center gap-3">
+                        <span className="flex-shrink-0 p-2 bg-blue-100 rounded-lg">
+                            <Stethoscope className="h-6 w-6 text-blue-600" />
+                        </span>
+                        <div>
+                            <h3 className="text-lg font-bold text-gray-900 break-words">{request.professional}</h3>
+                            <p className="text-sm text-gray-500">{request.hospitalName}</p>
+                        </div>
+                    </div>
+                    <span className="inline-block flex-shrink-0 px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                        Professional
+                    </span>
+                </div>
+
+                {/* Card Body: Details */}
+                <div className="my-4">
+                    <p className="text-sm font-semibold text-gray-700 mb-2">Requested Records:</p>
+                    <ul className="list-disc list-inside space-y-1 text-sm text-gray-600 pl-2">
+                        {(request.requestedRecords || []).map(rec => (
+                            <li key={rec.recordId}>{rec.title}</li>
+                        ))}
+                    </ul>
+                </div>
+            </div>
+
+            {/* Card Footer: Actions */}
+            <div className="flex justify-end gap-3">
+                <button
+                    onClick={onReject}
+                    disabled={isLoading}
+                    className="inline-flex items-center justify-center rounded-lg bg-red-100 px-4 py-2 text-sm font-semibold text-red-700 shadow-sm transition-colors hover:bg-red-200 disabled:opacity-50"
+                >
+                    {isLoading ? (
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                    ) : (
+                        <X className="h-5 w-5" />
+                    )}
+                    <span className="ml-2">Reject</span>
+                </button>
+                <button
+                    onClick={onApprove}
+                    disabled={isLoading}
+                    className="inline-flex items-center justify-center rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-green-700 disabled:bg-gray-400"
+                >
+                    {isLoading ? (
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                    ) : (
+                        <Check className="h-5 w-5" />
+                    )}
+                    <span className="ml-2">Approve</span>
+                </button>
+            </div>
+        </motion.div>
+    );
+};
+
+// --- NEW: Empty State Component ---
+const EmptyState = () => (
+    <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="flex flex-col items-center justify-center p-12 bg-white rounded-2xl shadow-xl border border-gray-100"
+    >
+        <MailOpen className="h-16 w-16 text-gray-400" />
+        <h3 className="mt-4 text-xl font-bold text-gray-900">No Pending Requests</h3>
+        <p className="mt-2 text-gray-600">
+            You're all caught up!
+        </p>
+    </motion.div>
+);
+
+// --- NEW: Skeleton for Card Grid ---
+const RequestGridSkeleton = () => (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {[...Array(2)].map((_, i) => (
+            <SkeletonCard key={i} />
+        ))}
+    </div>
+);
+
+const SkeletonCard = () => (
+    <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-5 animate-pulse">
+        <div className="flex justify-between items-start">
+            <div className="flex items-center gap-3">
+                <div className="h-10 w-10 bg-gray-200 rounded-lg"></div>
+                <div className="flex-1 space-y-2">
+                    <div className="h-5 bg-gray-200 rounded-lg w-3/4"></div>
+                    <div className="h-4 bg-gray-200 rounded-lg w-1/2"></div>
+                </div>
+            </div>
+            <div className="h-6 w-24 bg-gray-200 rounded-full"></div>
+        </div>
+        <div className="space-y-2 mt-4">
+            <div className="h-4 bg-gray-200 rounded-lg w-1/3"></div>
+            <div className="h-4 bg-gray-200 rounded-lg w-1/2"></div>
+        </div>
+        <div className="flex justify-end gap-3 mt-6">
+            <div className="h-9 w-24 bg-gray-200 rounded-lg"></div>
+            <div className="h-9 w-24 bg-gray-200 rounded-lg"></div>
+        </div>
+    </div>
+);

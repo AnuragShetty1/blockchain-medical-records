@@ -1,41 +1,42 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { useWeb3 } from '@/context/Web3Context';
+import { useWeb3 } from '../context/Web3Context';
 import axios from 'axios';
 import toast from 'react-hot-toast';
-import ConfirmationModal from './ConfirmationModal'; // <-- 1. IMPORT MODAL
+import ConfirmationModal from './ConfirmationModal';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Stethoscope, Copy, Users, Loader2, ShieldCheck } from 'lucide-react';
 
-// --- ICONS ---
-const RevokeIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>;
-const SpinnerWhite = () => <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>;
-// --- NEW ICONS for the professional table view ---
-const UserGroupIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m-7.5-2.962a3.75 3.75 0 100-7.5 3.75 3.75 0 000 7.5zM3.75 18.75a3 3 0 013-3h1.5a3 3 0 013 3v.75A3.75 3.75 0 0112 22.5h-2.25a3.75 3.75 0 01-3.75-3.75V18.75z" /></svg>;
+// --- ANIMATION VARIANTS (from theme) ---
+const gridVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+        opacity: 1,
+        transition: {
+            staggerChildren: 0.05,
+        },
+    },
+};
 
-// --- NEW HELPER: For creating a professional skeleton loader ---
-const TableSkeleton = () => (
-    <div className="space-y-2">
-        {[...Array(3)].map((_, i) => (
-            <div key={i} className="flex items-center justify-between p-4 bg-slate-50 rounded-lg animate-pulse">
-                <div className="flex-1 space-y-2">
-                    <div className="h-4 bg-slate-200 rounded w-1/3"></div>
-                    <div className="h-3 bg-slate-200 rounded w-1/4"></div>
-                </div>
-                <div className="h-8 bg-slate-200 rounded w-24"></div>
-            </div>
-        ))}
-    </div>
-);
-
+const cardVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: (i) => ({
+        opacity: 1,
+        y: 0,
+        transition: {
+            delay: i * 0.05,
+        },
+    }),
+};
 
 export default function AccessManagement() {
     // --- STATE AND LOGIC (UNCHANGED) ---
-    const { account, contract, api } = useWeb3(); // <-- Import API
+    const { account, contract, api } = useWeb3();
     const [grants, setGrants] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [isRevoking, setIsRevoking] = useState(null); // Keep this for button loading state
+    const [isRevoking, setIsRevoking] = useState(null);
 
-    // --- 2. ADD MODAL STATE ---
     const [modalState, setModalState] = useState({
         isOpen: false,
         title: '',
@@ -45,13 +46,11 @@ export default function AccessManagement() {
         confirmColor: 'bg-indigo-600',
     });
 
-    // Function to close the modal (respecting the loading state)
     const closeModal = () => {
-        if (isRevoking) return; // Use existing loading state
+        if (isRevoking) return;
         setModalState({ ...modalState, isOpen: false });
     };
 
-    // Function to open the modal for revoke action
     const openConfirm = (grant) => {
         setModalState({
             isOpen: true,
@@ -62,8 +61,6 @@ export default function AccessManagement() {
             confirmColor: 'bg-red-600'
         });
     };
-    // --- END OF MODAL STATE ---
-
 
     const fetchGrants = async () => {
         if (!account) return;
@@ -71,7 +68,6 @@ export default function AccessManagement() {
         try {
             const response = await axios.get(`http://localhost:3001/api/users/access-grants/patient/${account}`);
             if (response.data.success) {
-                // Sort by name for consistent ordering
                 const sortedGrants = (response.data.data || []).sort((a, b) => a.professionalName.localeCompare(b.professionalName));
                 setGrants(sortedGrants);
             }
@@ -88,116 +84,80 @@ export default function AccessManagement() {
     }, [account]);
 
     const handleRevoke = async (professionalAddress, recordIds) => {
-        // This function is now called by the modal's onConfirm
-        if (!api) { // <-- Check for API
+        if (!api) {
             toast.error("API service not available.");
             return;
         }
-        setIsRevoking(professionalAddress); // Set loading state for the button
+        setIsRevoking(professionalAddress);
         const toastId = toast.loading("Preparing revocation transaction...");
         try {
-            // --- THIS IS THE MIGRATION ---
-            // Replaced direct contract call with the sponsored API call
-            // We use `revokeRecordAccess` as it takes (professionalAddress, recordIds)
             await api.revokeRecordAccess(professionalAddress, recordIds);
-            // --- END OF MIGRATION ---
-
             toast.success("Access successfully revoked! The list will update shortly.", { id: toastId });
             setTimeout(fetchGrants, 4000);
         } catch (error) {
             console.error("Revocation failed:", error);
-            // Use error.message since API errors are standard Error objects
             toast.error(error.message || "Revocation transaction failed.", { id: toastId });
         } finally {
-            setIsRevoking(null); // Clear loading state
-            closeModal(); // Close modal on completion
+            setIsRevoking(null);
+            closeModal();
+        }
+    };
+    // --- END OF LOGIC ---
+
+    // --- NEW: Handle Copy for Address ---
+    const handleCopyAddress = (address) => {
+        try {
+            const tempInput = document.createElement('input');
+            tempInput.value = address;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempInput);
+            toast.success('Address copied to clipboard!');
+        } catch (err) {
+            toast.error('Failed to copy address.');
         }
     };
 
-    // --- UI REDESIGN ---
+
     return (
-        <div className="p-8 bg-white rounded-2xl shadow-xl border border-slate-200">
+        <div className="p-0"> {/* Removed parent padding, handled by Dashboard tab */}
+            {/* --- REFACTORED: Header --- */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6">
                 <div>
-                    <h2 className="text-3xl font-bold text-slate-800">Access Management</h2>
-                    <p className="text-slate-500 mt-1">Review and manage active permissions for your shared records.</p>
+                    {/* Title and description are now provided by AccessTabContent */}
                 </div>
             </div>
 
-            <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left text-slate-500">
-                        <thead className="text-xs text-slate-700 uppercase bg-slate-50">
-                            <tr>
-                                <th scope="col" className="px-6 py-4">Professional</th>
-                                <th scope="col" className="px-6 py-4">Hospital / Clinic</th>
-                                <th scope="col" className="px-6 py-4 text-center">Records Shared</th>
-                                <th scope="col" className="px-6 py-4 text-center">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {isLoading ? (
-                                // --- NEW: Render skeleton rows during loading ---
-                                [...Array(3)].map((_, i) => (
-                                    <tr key={i}>
-                                        <td colSpan="4" className="px-6 py-4">
-                                            <div className="flex items-center gap-4 animate-pulse">
-                                                <div className="h-10 w-10 bg-slate-200 rounded-full"></div>
-                                                <div className="flex-1 space-y-2">
-                                                    <div className="h-4 bg-slate-200 rounded w-2/3"></div>
-                                                    <div className="h-3 bg-slate-200 rounded w-1/3"></div>
-                                                </div>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))
-                            ) : grants.length === 0 ? (
-                                // --- NEW: Redesigned empty state ---
-                                <tr>
-                                    <td colSpan="4" className="text-center p-12">
-                                        <UserGroupIcon />
-                                        <p className="font-semibold text-slate-600 mt-4">No Active Permissions</p>
-                                        <p className="text-sm text-slate-500 mt-1">
-                                            You haven't shared your records with any professionals yet.
-                                        </p>
-                                    </td>
-                                </tr>
-                            ) : (
-                                // --- NEW: Map grants to table rows ---
-                                grants.map((grant) => (
-                                    <tr key={grant.professionalAddress} className="bg-white border-b hover:bg-slate-50 transition-colors">
-                                        <td className="px-6 py-4">
-                                            <div className="font-semibold text-slate-900">{grant.professionalName}</div>
-                                            <div className="font-mono text-xs text-slate-400 mt-1">{grant.professionalAddress}</div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            {grant.hospitalName}
-                                        </td>
-                                        <td className="px-6 py-4 text-center">
-                                            <span className="inline-block px-2 py-1 text-xs font-semibold text-teal-800 bg-teal-100 rounded-full">
-                                                {grant.recordIds.length} Record(s)
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 text-center">
-                                            <button
-                                                onClick={() => openConfirm(grant)} // <-- 3. MODIFY ONCLICK
-                                                disabled={isRevoking === grant.professionalAddress}
-                                                className="flex items-center justify-center w-full max-w-[120px] mx-auto px-3 py-2 text-xs font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors shadow-sm disabled:bg-slate-400 disabled:cursor-not-allowed"
-                                            >
-                                                {isRevoking === grant.professionalAddress ? <SpinnerWhite /> : <RevokeIcon />}
-                                                {isRevoking === grant.professionalAddress ? 'Revoking' : 'Revoke'}
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+            {/* --- REFACTORED: Main Content (Grid) --- */}
+            <AnimatePresence>
+                {isLoading ? (
+                    <AccessGridSkeleton />
+                ) : grants.length === 0 ? (
+                    <EmptyState />
+                ) : (
+                    <motion.div
+                        className="grid grid-cols-1 md:grid-cols-2 gap-6"
+                        variants={gridVariants}
+                        initial="hidden"
+                        animate="visible"
+                    >
+                        {grants.map((grant, index) => (
+                            <AccessCard
+                                key={grant.professionalAddress}
+                                grant={grant}
+                                isRevoking={isRevoking === grant.professionalAddress}
+                                onRevoke={() => openConfirm(grant)}
+                                onCopy={() => handleCopyAddress(grant.professionalAddress)}
+                                customIndex={index}
+                            />
+                        ))}
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
-             {/* --- 4. RENDER THE MODAL --- */}
-             <ConfirmationModal
+            {/* --- UNCHANGED: Modal Render --- */}
+            <ConfirmationModal
                 isOpen={modalState.isOpen}
                 onClose={closeModal}
                 onConfirm={modalState.onConfirm}
@@ -205,8 +165,119 @@ export default function AccessManagement() {
                 message={modalState.message}
                 confirmText={modalState.confirmText}
                 confirmColor={modalState.confirmColor}
-                isLoading={isRevoking !== null} // Tie loading to existing state
+                isLoading={isRevoking !== null}
             />
         </div>
     );
 }
+
+// --- NEW: Access Card Component ---
+const AccessCard = ({ grant, isRevoking, onRevoke, onCopy, customIndex }) => {
+    return (
+        <motion.div
+            variants={cardVariants}
+            custom={customIndex}
+            whileHover={{ scale: 1.03 }}
+            className="flex flex-col justify-between bg-white rounded-2xl shadow-xl border border-gray-100 p-5 transition-all duration-300"
+        >
+            <div>
+                {/* Card Header */}
+                <div className="flex items-center gap-3">
+                    <span className="flex-shrink-0 p-2 bg-blue-100 rounded-lg">
+                        <Stethoscope className="h-6 w-6 text-blue-600" />
+                    </span>
+                    <div>
+                        <h3 className="text-lg font-bold text-gray-900 break-words">{grant.professionalName}</h3>
+                        <p className="text-sm text-gray-500">{grant.hospitalName}</p>
+                    </div>
+                </div>
+
+                {/* Card Body: Details */}
+                <div className="space-y-4 mt-4">
+                    <div className="flex items-center">
+                        <span className="px-3 py-1 text-sm font-semibold text-teal-800 bg-teal-100 rounded-full">
+                            {grant.recordIds.length} Record(s) Shared
+                        </span>
+                    </div>
+
+                    <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                        <label className="text-xs font-medium text-gray-500">Professional's Address</label>
+                        <div className="flex items-center justify-between gap-2 mt-1">
+                            <p className="font-mono text-sm text-gray-700 truncate">{grant.professionalAddress}</p>
+                            <button
+                                onClick={onCopy}
+                                className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-gray-200 rounded-md transition-colors flex-shrink-0"
+                                title="Copy Address"
+                            >
+                                <Copy className="h-4 w-4" />
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Card Footer: Actions */}
+            <div className="flex justify-end gap-2 mt-6">
+                <button
+                    onClick={onRevoke}
+                    disabled={isRevoking}
+                    className="flex items-center justify-center w-full sm:w-auto px-4 py-2 text-sm font-semibold text-white bg-red-600 rounded-lg shadow-md hover:bg-red-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                    {isRevoking ? (
+                        <>
+                            <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                            Revoking...
+                        </>
+                    ) : (
+                        <ShieldCheck className="h-5 w-5 mr-1.5" />
+                    )}
+                    <span>{isRevoking ? "" : "Revoke Access"}</span>
+                </button>
+            </div>
+        </motion.div>
+    );
+};
+
+
+// --- NEW: Empty State Component ---
+const EmptyState = () => (
+    <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="flex flex-col items-center justify-center p-12 bg-white rounded-2xl shadow-xl border border-gray-100"
+    >
+        <Users className="h-16 w-16 text-gray-400" />
+        <h3 className="mt-4 text-xl font-bold text-gray-900">No Active Permissions</h3>
+        <p className="mt-2 text-gray-600">
+            You haven't shared your records with any professionals yet.
+        </p>
+    </motion.div>
+);
+
+// --- NEW: Skeleton for Card Grid ---
+const AccessGridSkeleton = () => (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {[...Array(2)].map((_, i) => (
+            <SkeletonCard key={i} />
+        ))}
+    </div>
+);
+
+const SkeletonCard = () => (
+    <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-5 animate-pulse">
+        <div className="flex items-center gap-3">
+            <div className="h-10 w-10 bg-gray-200 rounded-lg"></div>
+            <div className="flex-1 space-y-2">
+                <div className="h-5 bg-gray-200 rounded-lg w-3/4"></div>
+                <div className="h-4 bg-gray-200 rounded-lg w-1/2"></div>
+            </div>
+        </div>
+        <div className="space-y-3 mt-4">
+            <div className="h-6 bg-gray-200 rounded-full w-1/3"></div>
+            <div className="h-12 bg-gray-200 rounded-lg w-full"></div>
+        </div>
+        <div className="flex justify-end mt-6">
+            <div className="h-9 w-28 bg-gray-200 rounded-lg"></div>
+        </div>
+    </div>
+);
