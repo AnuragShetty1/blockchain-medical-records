@@ -439,5 +439,3 @@ function CTASection() {
         </section>
     );
 }
-
-
