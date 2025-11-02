@@ -1,18 +1,20 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
-import { useWeb3 } from '@/context/Web3Context'; // Original aliased path
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useWeb3 } from '../context/Web3Context'; // CORRECTED: Relative path
 import toast from 'react-hot-toast';
-// CORRECTED: Switched to aliased paths as expected by the build system
-import VerifiedUploadForm from '@/components/VerifiedUploadForm';
-import DoctorRecordList from '@/components/DoctorRecordList';
+import VerifiedUploadForm from './VerifiedUploadForm'; // CORRECTED: Relative path
+import DoctorRecordList from './DoctorRecordList'; // CORRECTED: Relative path
 import axios from 'axios';
 // REMOVED: use-debounce import
-// import { useDebounce } from 'use-debounce'; 
-import { Stethoscope, UploadCloud, FileSearch, HeartHandshake, Search, User, X as CloseIcon, ChevronDown, Info, Loader2 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion'; // NEW: Import framer-motion
-
-// REMOVED: StaticClinicalBackground component
+import {
+    Stethoscope, UploadCloud, FileSearch, HeartHandshake, Search, User,
+    X as CloseIcon, ChevronDown, Info, Loader2,
+    // --- (NEW) IMPORTS ---
+    TestTube, ClipboardList, FileShield, FileQuestion
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { format } from 'date-fns'; // --- (NEW) IMPORT ---
 
 // --- DoctorDashboard (Main Component) ---
 export default function DoctorDashboard() {
@@ -123,6 +125,16 @@ const TabNavigation = ({ activeTab, onTabChange }) => {
     );
 };
 
+// --- (NEW) HELPER FUNCTION ---
+const getCategoryIcon = (category) => {
+    switch (category) {
+        case 'lab-result': return TestTube;
+        case 'prescription': return ClipboardList;
+        case 'doctor-note': return Stethoscope;
+        case 'insurance-claim': return FileShield;
+        default: return FileQuestion;
+    }
+};
 
 // --- PatientSearchColumn (Restyled Internally) ---
 const PatientSearchColumn = ({ onPatientSelect }) => {
@@ -262,9 +274,9 @@ const UploadSection = () => {
     );
 };
 
-// --- RequestAccessSection (Wrapped in Premium Card) ---
+// --- RequestAccessSection (MODIFIED as per plan) ---
 const RequestAccessSection = () => {
-    const { api } = useWeb3(); // Logic (Unchanged)
+    const { api } = useWeb3();
     const [patientProfile, setPatientProfile] = useState(null);
     const [patientRecords, setPatientRecords] = useState([]);
     const [isLoadingRecords, setIsLoadingRecords] = useState(false);
@@ -272,7 +284,49 @@ const RequestAccessSection = () => {
     const [justification, setJustification] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // Logic (Unchanged)
+    // --- (NEW) STATE FOR FILTERS ---
+    const [filterCategory, setFilterCategory] = useState('all');
+    const [sortBy, setSortBy] = useState('date-desc');
+    // ---
+
+    // --- (NEW) MEMO FOR FILTERING/SORTING ---
+    const CATEGORIES_MAP = {
+        'all': 'All Categories',
+        'lab-result': 'Lab Results',
+        'prescription': 'Prescriptions',
+        'doctor-note': 'Doctor Notes',
+        'insurance-claim': 'Insurance',
+        'other': 'Other',
+    };
+
+    const filteredAndSortedRecords = useMemo(() => {
+        let processedRecords = [...patientRecords];
+
+        // 1. Filter
+        if (filterCategory !== 'all') {
+            processedRecords = processedRecords.filter(record => record.category === filterCategory);
+        }
+
+        // 2. Sort (using timestamp * 1000 to convert seconds to ms for Date constructor)
+        processedRecords.sort((a, b) => {
+            const dateA = new Date(Number(a.timestamp) * 1000);
+            const dateB = new Date(Number(b.timestamp) * 1000);
+            switch (sortBy) {
+                case 'date-asc':
+                    return dateA - dateB;
+                case 'category':
+                    return (a.category || '').localeCompare(b.category || '');
+                case 'date-desc':
+                default:
+                    return dateB - dateA;
+            }
+        });
+
+        return processedRecords;
+    }, [patientRecords, filterCategory, sortBy]);
+    // ---
+
+    // (Unchanged)
     useEffect(() => {
         const fetchPatientRecords = async () => {
             if (!patientProfile) return;
@@ -290,7 +344,7 @@ const RequestAccessSection = () => {
         fetchPatientRecords();
     }, [patientProfile]);
 
-    // Logic (Unchanged)
+    // (Unchanged)
     const handleRecordSelect = (recordId) => {
         setSelectedRecords(prev => {
             const newSet = new Set(prev);
@@ -300,7 +354,19 @@ const RequestAccessSection = () => {
         });
     };
 
-    // Logic (Unchanged)
+    // --- (NEW) SELECT ALL FUNCTION ---
+    const handleSelectAll = (e) => {
+        if (e.target.checked) {
+            // Select all *currently filtered* records
+            const allFilteredIds = filteredAndSortedRecords.map(r => r.recordId);
+            setSelectedRecords(new Set(allFilteredIds));
+        } else {
+            setSelectedRecords(new Set());
+        }
+    };
+    // ---
+
+    // --- (MODIFIED) handleSubmitRequest with RESET ---
     const handleSubmitRequest = async () => {
         if (selectedRecords.size === 0) return toast.error("Please select at least one record.");
         if (!api || !patientProfile) return toast.error("API service not loaded or patient not selected.");
@@ -317,6 +383,12 @@ const RequestAccessSection = () => {
             toast.success("Access request submitted!", { id: toastId });
             setSelectedRecords(new Set());
             setJustification('');
+
+            // --- (NEW) RESET FILTERS ON SUCCESS ---
+            setFilterCategory('all');
+            setSortBy('date-desc');
+            // ---
+
         } catch (error) {
             console.error("Failed to submit request:", error);
             toast.error(error.message || "An error occurred.", { id: toastId });
@@ -325,11 +397,10 @@ const RequestAccessSection = () => {
         }
     };
 
-    // REFACTORED: Wrapped in premium card
     return (
         <motion.div
             className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 md:p-8"
-            variants={cardItemVariants} // Use cardItemVariants
+            variants={cardItemVariants}
             initial="hidden"
             animate="visible"
         >
@@ -349,24 +420,95 @@ const RequestAccessSection = () => {
                                     <CloseIcon className="h-4 w-4" /> Clear
                                 </button>
                             </div>
-                            {/* REFACTORED: Main content box */}
                             <div className="bg-white p-6 border border-gray-200 rounded-lg">
                                 <h3 className="text-lg font-bold text-gray-800 mb-4">Select Records to Request</h3>
+
+                                {/* --- (NEW) CONTROL BAR --- */}
+                                <div className="flex flex-col sm:flex-row gap-4 justify-between items-center mb-4 p-3 bg-gray-50 rounded-lg border">
+                                    <div className="flex items-center">
+                                        <input
+                                            id="select-all-requests"
+                                            type="checkbox"
+                                            className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                            onChange={handleSelectAll}
+                                            checked={filteredAndSortedRecords.length > 0 && selectedRecords.size === filteredAndSortedRecords.length}
+                                            disabled={filteredAndSortedRecords.length === 0}
+                                        />
+                                        <label htmlFor="select-all-requests" className="ml-2 text-sm font-medium text-gray-700">Select All</label>
+                                    </div>
+                                    <div className="flex gap-4">
+                                        <select
+                                            value={filterCategory}
+                                            onChange={(e) => setFilterCategory(e.target.value)}
+                                            className="px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                                        >
+                                            {Object.entries(CATEGORIES_MAP).map(([id, name]) => (
+                                                <option key={id} value={id}>{name}</option>
+                                            ))}
+                                        </select>
+                                        <select
+                                            value={sortBy}
+                                            onChange={(e) => setSortBy(e.target.value)}
+                                            className="px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                                        >
+                                            <option value="date-desc">Date: Newest</option>
+                                            <option value="date-asc">Date: Oldest</option>
+                                            <option value="category">Category</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                {/* --- (END) CONTROL BAR --- */}
+
                                 {isLoadingRecords ? (
                                     <div className="flex justify-center items-center py-8"><Loader2 className="h-8 w-8 animate-spin text-gray-400" /></div>
-                                ) : patientRecords.length > 0 ? (
-                                    <div className="space-y-3 max-h-72 overflow-y-auto pr-2">
-                                        {patientRecords.map(record => (
-                                            <label key={record.recordId} className="flex items-center p-3.5 bg-gray-50 rounded-lg border border-gray-200 cursor-pointer hover:bg-blue-50/50 hover:border-blue-200 transition-colors">
-                                                <input type="checkbox" checked={selectedRecords.has(record.recordId)} onChange={() => handleRecordSelect(record.recordId)} className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                                                <span className="ml-4 font-medium text-gray-700">{record.title}</span>
-                                                <span className="ml-auto text-sm text-gray-600 bg-gray-200 px-2 py-1 rounded-full">{record.category}</span>
-                                            </label>
-                                        ))}
-                                    </div>
-                                ) : (
+                                ) : patientRecords.length === 0 ? (
                                     <p className="text-gray-500 text-center py-8">This patient has no records available to request.</p>
+                                    // --- (MODIFIED) Check filtered list length ---
+                                ) : filteredAndSortedRecords.length === 0 ? (
+                                    <p className="text-gray-500 text-center py-8">No records match your filters.</p>
+                                ) : (
+                                    // --- (MODIFIED) Render new filtered list + new UI ---
+                                    <div className="space-y-3 max-h-72 overflow-y-auto pr-2">
+                                        {filteredAndSortedRecords.map(record => {
+                                            const Icon = getCategoryIcon(record.category);
+                                            const isSelected = selectedRecords.has(record.recordId);
+                                            
+                                            // --- (FIX) Validate timestamp before formatting ---
+                                            const isValidDate = record.timestamp && !isNaN(Number(record.timestamp));
+                                            const displayDate = isValidDate ? format(new Date(Number(record.timestamp) * 1000), "PP") : "Invalid Date";
+
+                                            return (
+                                                <label
+                                                    key={record.recordId}
+                                                    className={`flex items-center p-3.5 rounded-lg border cursor-pointer transition-colors
+                                                        ${isSelected
+                                                            ? 'bg-blue-50 border-blue-400'
+                                                            : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
+                                                        }
+                                                    `}
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={isSelected}
+                                                        onChange={() => handleRecordSelect(record.recordId)}
+                                                        className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                                    />
+                                                    <Icon className="h-5 w-5 text-gray-500 ml-4 mr-3 flex-shrink-0" />
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="font-medium text-gray-800 truncate">{record.title}</p>
+                                                        <p className="text-sm text-gray-500">
+                                                            {displayDate}
+                                                        </p>
+                                                    </div>
+                                                    <span className="ml-auto text-xs text-gray-600 bg-gray-200 px-2 py-1 rounded-full whitespace-nowrap">
+                                                        {CATEGORIES_MAP[record.category] || 'Other'}
+                                                    </span>
+                                                </label>
+                                            );
+                                        })}
+                                    </div>
                                 )}
+                                {/* --- (END MODIFICATION) --- */}
 
                                 <div className="pt-6 mt-6 border-t border-gray-200">
                                     <label htmlFor="justification" className="block text-sm font-medium text-gray-700 mb-2">
@@ -390,7 +532,6 @@ const RequestAccessSection = () => {
                             </div>
                         </div>
                     ) : (
-                        // REFACTORED: Placeholder
                         <div className="h-full min-h-[400px] lg:min-h-[500px] flex flex-col justify-center items-center text-center p-8 bg-gray-50/50 border border-gray-200 rounded-lg">
                             <User className="h-16 w-16 text-gray-300 mb-4" />
                             <h3 className="text-lg font-semibold text-gray-700">Select a Patient</h3>
@@ -409,7 +550,6 @@ const ReviewSection = () => {
     const [patientGroups, setPatientGroups] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
-    // Logic (Unchanged)
     const fetchSharedRecords = useCallback(async () => {
         if (!account) return;
         setIsLoading(true);
@@ -427,7 +567,6 @@ const ReviewSection = () => {
         }
     }, [account]);
 
-    // Logic (Unchanged)
     useEffect(() => {
         fetchSharedRecords();
     }, [fetchSharedRecords]);
@@ -447,7 +586,6 @@ const ReviewSection = () => {
     }
 
     if (patientGroups.length === 0) {
-        // REFACTORED: Empty state
         return (
             <motion.div
                 className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 md:p-8 flex flex-col justify-center items-center text-center min-h-[300px]"
@@ -462,7 +600,6 @@ const ReviewSection = () => {
         );
     }
 
-    // REFACTORED: Renders a list of cards
     return (
         <motion.div
             className="space-y-8"
@@ -481,7 +618,6 @@ const ReviewSection = () => {
 const PatientRecordGroup = ({ patient, records, customIndex }) => {
     const [isOpen, setIsOpen] = useState(true);
 
-    // REFACTORED: Styles
     return (
         <motion.div
             className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden"
@@ -501,7 +637,6 @@ const PatientRecordGroup = ({ patient, records, customIndex }) => {
                     <ChevronDown className={`h-6 w-6 text-gray-400 transform transition-transform ${isOpen ? 'rotate-180' : ''}`} />
                 </div>
             </button>
-            {/* REFACTORED: Use AnimatePresence for smooth open/close */}
             <AnimatePresence>
                 {isOpen && (
                     <motion.div
@@ -511,7 +646,6 @@ const PatientRecordGroup = ({ patient, records, customIndex }) => {
                         transition={{ duration: 0.3, ease: "easeInOut" }}
                         className="border-t border-gray-200 overflow-hidden"
                     >
-                        {/* DoctorRecordList is an external component, renders as-is */}
                         <DoctorRecordList records={records} />
                     </motion.div>
                 )}
@@ -521,8 +655,6 @@ const PatientRecordGroup = ({ patient, records, customIndex }) => {
 };
 
 // --- STATIC "MODERN CLINICAL" BACKGROUND (Helper) ---
-// This is used internally by VerifiedUploadForm, so we must define it.
-// It is not used by the dashboard background itself anymore.
 const DOCTOR_CATEGORIES = [
     { value: 'doctor-note', label: 'Doctor\'s Note' },
     { value: 'prescription', label: 'Prescription' },
@@ -531,7 +663,6 @@ const DOCTOR_CATEGORIES = [
 ];
 
 // --- Animation Variants (Helper) ---
-// These are used by the child components (UploadSection, etc.)
 const cardContainerVariants = {
     hidden: { opacity: 0 },
     visible: {
