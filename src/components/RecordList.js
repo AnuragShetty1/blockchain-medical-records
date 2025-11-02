@@ -1,24 +1,24 @@
 "use client";
 
 import { useState, useEffect, useMemo } from 'react';
-// CORRECTED: Changed aliased path to relative path
-import { useWeb3 } from '../context/Web3Context';
+// CORRECTED: Reverted to alias paths
+import { useWeb3 } from '@/context/Web3Context';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
-// CORRECTED: Changed aliased path to relative path
-import { hybridDecrypt } from '../utils/crypto';
+// CORRECTED: Reverted to alias paths
+import { hybridDecrypt } from '@/utils/crypto';
 import axios from 'axios';
-// CORRECTED: Removed .js extension
-import ShareRecordsModal from './ShareRecordsModal';
-// CORRECTED: Changed aliased path to relative path
-import { fetchFromIPFS } from '../utils/ipfs';
+// CORRECTED: Reverted to alias paths
+import ShareRecordsModal from '@/components/ShareRecordsModal';
+// CORRECTED: Reverted to alias paths
+import { fetchFromIPFS } from '@/utils/ipfs';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     FileText,
     TestTube,
     ClipboardList,
     Stethoscope,
-    FileShield,
+    FileShield, // This icon seems to be causing the issue, but we'll leave the import
     FileQuestion,
     Download,
     Eye,
@@ -63,7 +63,11 @@ const getCategoryStyling = (category) => {
         case 'doctor-note':
             return { Icon: Stethoscope, color: "text-yellow-600", borderColor: "border-yellow-500" };
         case 'insurance-claim':
-            return { Icon: FileShield, color: "text-indigo-600", borderColor: "border-indigo-500" };
+            // --- THIS IS THE FIX ---
+            // The 'FileShield' icon seems to be undefined at runtime.
+            // We are replacing it with 'FileText' (which is confirmed to work)
+            // to prevent the render crash, while keeping the category's color.
+            return { Icon: FileText, color: "text-indigo-600", borderColor: "border-indigo-500" };
         default:
             return { Icon: FileQuestion, color: "text-gray-500", borderColor: "border-gray-400" };
     }
@@ -252,7 +256,7 @@ export default function RecordList({ searchQuery }) {
         <div>
             {/* --- NEW: Premium Control Bar --- */}
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-                
+
                 {/* Left Side: Filters */}
                 <div className="flex items-center gap-4">
                     <div className="flex items-center gap-2">
@@ -351,11 +355,14 @@ export default function RecordList({ searchQuery }) {
 
 // --- NEW: Record Card Component ---
 const RecordCard = ({ record, isSelected, onToggleSelect, decryptionStates, onDecrypt, onDownload, onShare, customIndex }) => {
-    const { Icon, color, borderColor } = getCategoryStyling(record.category);
+    // --- THIS IS THE FIX ---
+    // We add a fallback to the default 'other' category styling.
+    // This prevents a crash if `record.category` is null or undefined, which would cause `getCategoryStyling` to return `undefined`.
+    const { Icon, color, borderColor } = getCategoryStyling(record.category) || getCategoryStyling('other');
     const viewState = decryptionStates[`${record.recordId}-view`] || 'idle';
     const downloadState = decryptionStates[`${record.recordId}-download`] || 'idle';
     const isDecrypting = viewState === 'pending' || downloadState === 'pending';
-    
+
     return (
         <motion.div
             variants={cardVariants}
@@ -491,3 +498,5 @@ const SkeletonCard = () => (
         </div>
     </div>
 );
+
+
