@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useWeb3 } from '../context/Web3Context'; // CORRECTED: Relative path
+import { useWeb3 } from '../context/Web3Context';
 import toast from 'react-hot-toast';
-import VerifiedUploadForm from './VerifiedUploadForm'; // CORRECTED: Relative path
-import DoctorRecordList from './DoctorRecordList'; // CORRECTED: Relative path
+import VerifiedUploadForm from './VerifiedUploadForm';
+import DoctorRecordList from './DoctorRecordList';
 import axios from 'axios';
 // REMOVED: use-debounce import
 import {
@@ -551,8 +551,11 @@ const ReviewSection = () => {
     const [isLoading, setIsLoading] = useState(true);
 
     const fetchSharedRecords = useCallback(async () => {
-        if (!account) return;
-        setIsLoading(true);
+        if (!account) {
+            setIsLoading(false); // <-- FIX: Stop loading if no account is found
+            return;
+        }
+        setIsLoading(true); // Set loading to true *when* we are actually fetching
         try {
             const response = await axios.get(`http://localhost:3001/api/users/records/professional/${account}`);
             if (response.data.success) {
@@ -571,6 +574,21 @@ const ReviewSection = () => {
         fetchSharedRecords();
     }, [fetchSharedRecords]);
 
+    // Flatten the patientGroups structure for immediate display in DoctorRecordList
+    const allRecords = useMemo(() => {
+        return patientGroups.flatMap(group => {
+            // Include patient address and name in each record for better context in DoctorRecordList
+            if (group.patient && group.records) {
+                return group.records.map(record => ({
+                    ...record,
+                    patientName: group.patient.name,
+                    patientAddress: group.patient.address,
+                }));
+            }
+            return [];
+        });
+    }, [patientGroups]);
+
     if (isLoading) {
         return (
             <motion.div
@@ -585,7 +603,7 @@ const ReviewSection = () => {
         );
     }
 
-    if (patientGroups.length === 0) {
+    if (allRecords.length === 0) {
         return (
             <motion.div
                 className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 md:p-8 flex flex-col justify-center items-center text-center min-h-[300px]"
@@ -600,22 +618,23 @@ const ReviewSection = () => {
         );
     }
 
+    // --- MODIFICATION: Skip PatientRecordGroup and render DoctorRecordList directly ---
     return (
         <motion.div
-            className="space-y-8"
-            variants={cardContainerVariants}
+            className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 md:p-8"
+            variants={cardItemVariants}
             initial="hidden"
             animate="visible"
         >
-            {patientGroups.map(({ patient, records }, index) => (
-                <PatientRecordGroup key={patient.address} patient={patient} records={records} customIndex={index} />
-            ))}
+            <DoctorRecordList records={allRecords} isFlattenedView={true} />
         </motion.div>
     );
 };
 
-// --- PatientRecordGroup (Now a premium card) ---
+// --- PatientRecordGroup (Temporarily kept but no longer used in ReviewSection) ---
 const PatientRecordGroup = ({ patient, records, customIndex }) => {
+    // This component is now intentionally skipped above.
+    // I am keeping it here just in case you want to revert later, but it won't render now.
     const [isOpen, setIsOpen] = useState(true);
 
     return (
@@ -685,4 +704,3 @@ const cardItemVariants = {
         },
     }),
 };
-
