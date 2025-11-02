@@ -407,6 +407,24 @@ export const Web3Provider = ({ children }) => {
             return apiFetch('/api/users/sponsored/update-profile', 'POST', { name, userAddress: account });
         },
 
+        // --- MODIFIED FUNCTION FOR REJECTED HOSPITAL ---
+        resetRegistration: async () => {
+            // This function ONLY resets hospital requests (off-chain)
+            const response = await apiFetch('/api/users/sponsored/reset-registration', 'POST', { userAddress: account });
+            setUserStatus('unregistered');
+            return response;
+        },
+
+        // --- NEW FUNCTION FOR REJECTED PROFESSIONALS ---
+        resetProfessionalRegistration: async () => {
+            // This new function must call a backend endpoint that DELETES THE ON-CHAIN USER
+            // and also deletes the off-chain registration request.
+            const response = await apiFetch('/api/users/sponsored/reset-professional-registration', 'POST', { userAddress: account });
+            setUserStatus('unregistered'); // Optimistically set status
+            return response;
+        },
+        // --- END OF NEW FUNCTION ---
+
         // --- Record Management ---
         addSelfUploadedRecord: (recordData) => {
             // [FIX] Add userAddress: account to the body
