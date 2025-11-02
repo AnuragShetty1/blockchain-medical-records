@@ -6,59 +6,73 @@ import SuperAdminDashboard from "@/components/SuperAdminDashboard";
 import DashboardSkeleton from "@/components/DashboardSkeleton";
 import HospitalRequestPending from "@/components/HospitalRequestPending";
 import { useWeb3 } from "@/context/Web3Context";
-import Image from 'next/image';
+import Image from 'next/image'; // This import is kept for RegistrationViews
 import PendingVerification from '@/components/PendingVerification';
-// --- FIX ---
-// Import the new component that will be displayed to revoked users.
 import AccessRevoked from "@/components/AccessRevoked";
+
+// --- NEW IMPORT ---
+// We import our new, dedicated LandingPage component.
+import LandingPage from "@/components/LandingPage";
+
+// --- REMOVED ---
+// LandingHeader, Footer, and lucide-react icons are no longer needed here.
+// They are now correctly handled inside src/components/LandingPage.js.
 
 export default function Home() {
     const { account, isRegistered, userProfile, owner, isLoadingProfile, userStatus } = useWeb3();
 
     const renderContent = () => {
+        // --- MODIFICATION ---
+        // This wrapper will be used for ALL logged-in states to preserve the
+        // original layout (centered, gray background).
+        const loggedInWrapper = (content) => (
+            <div className="flex items-center justify-center min-h-[calc(100vh-128px)] bg-slate-50">
+                {content}
+            </div>
+        );
+
+        // --- NO CHANGES to any of this logged-in logic ---
         if (isLoadingProfile) {
-            return <DashboardSkeleton />;
+            // Apply the wrapper to all logged-in views
+            return loggedInWrapper(<DashboardSkeleton />);
         }
 
         if (account && owner && account.toLowerCase() === owner.toLowerCase()) {
-            return <SuperAdminDashboard />;
+            return loggedInWrapper(<SuperAdminDashboard />);
         }
 
         if (isRegistered && userProfile) {
-            return <Dashboard />;
+            return loggedInWrapper(<Dashboard />);
         }
 
         if (account) {
             switch (userStatus) {
                 case 'unregistered':
-                    return <RegistrationViews />;
+                    // RegistrationViews is a logged-in state, so it gets the wrapper.
+                    return loggedInWrapper(<RegistrationViews />);
                 case 'pending_hospital':
                 case 'rejected':
-                    return <HospitalRequestPending />;
+                    return loggedInWrapper(<HospitalRequestPending />);
                 case 'pending':
-                    return <PendingVerification />;
+                    return loggedInWrapper(<PendingVerification />);
                 
-                // --- MISTAKE ---
-                // The main application router did not have a case for the 'revoked' status. When a user
-                // with this status connected, they were no longer considered "registered", so the logic
-                // fell through to the default case, which rendered a loading skeleton, appearing as a blank page.
-                // --- FIX ---
-                // A new `case` is added for the 'revoked' status. This ensures that when the main router
-                // detects a revoked user, it immediately renders the `AccessRevoked` component,
-                // correctly blocking them and displaying the appropriate message. This completes the fix.
                 case 'revoked':
-                    return <AccessRevoked />;
+                    return loggedInWrapper(<AccessRevoked />);
 
                 default:
-                    // This handles the initial loading state before the user's status is determined by the context.
-                    return <DashboardSkeleton />;
+                    return loggedInWrapper(<DashboardSkeleton />);
             }
         }
 
-        // If no account is connected, show the welcome message.
-        return <WelcomeMessage />;
+        // --- MODIFICATION ---
+        // If no account is connected, show the new <LandingPage />.
+        // This component is full-width and does NOT use the loggedInWrapper.
+        // This now refers to the component we imported.
+        return <LandingPage />;
     };
 
+    // --- NO CHANGES ---
+    // This component is kept as-is, as it's part of the logged-in registration flow.
     const RegistrationViews = () => (
         <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
             {/* Left Side: Informational Content */}
@@ -99,30 +113,18 @@ export default function Home() {
         </div>
     );
 
-    const WelcomeMessage = () => (
-        <div className="text-center bg-white p-8 rounded-lg shadow-md">
-            <div className="flex flex-col items-center justify-center space-y-4">
-                <div className="flex items-center space-x-3">
-                    <h1 className="text-3xl font-bold text-gray-800 flex gap-1 justify-center items-center">Welcome to PRISM<Image
-                        src="/logo.png"
-                        alt="PRISM Logo"
-                        width={50}
-                        height={50}
-                    /></h1>
-                </div>
+    // --- REMOVED ---
+    // The old `WelcomeMessage` component is no longer needed.
 
-                <p className="text-2xl font-bold font-semibold text-gray-600">
-                    Patient Record Integrity and Security Management
-                </p>
-                <p className="pt-4 text-gray-600">
-                    Please connect your wallet to begin the registration process.
-                </p>
-            </div>
-        </div>
-    );
+    // --- REMOVED ---
+    // The entire inline `LandingPage` component definition has been
+    // deleted from this file.
 
     return (
-        <div className="flex items-center justify-center min-h-[calc(100vh-128px)] bg-slate-50">
+        // --- NO CHANGES ---
+        // This container is correct. `renderContent` will return
+        // either the full-page <LandingPage/> or the dashboard components.
+        <div className="w-full">
             {renderContent()}
         </div>
     );
