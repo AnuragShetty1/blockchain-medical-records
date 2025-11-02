@@ -4,51 +4,90 @@ import { useState, useRef, useEffect } from 'react';
 import { useWeb3 } from '@/context/Web3Context';
 import toast from 'react-hot-toast';
 import HospitalRequestPending from './HospitalRequestPending';
-// --- FIX: Step 1 ---
-// Import the HospitalRegistrationForm to embed it directly within this component.
-import HospitalRegistrationForm from './HospitalRegistrationForm';
-import ConfirmationModal from './ConfirmationModal'; // <-- 1. IMPORT MODAL
-
+// import HospitalRegistrationForm from './HospitalRegistrationForm'; // No longer needed
+import ConfirmationModal from './ConfirmationModal';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+    User, 
+    Building, 
+    Stethoscope, 
+    Beaker, 
+    Loader2, 
+    Check, 
+    Circle, 
+    ArrowLeft,
+    ChevronRight
+} from 'lucide-react';
 
 const roles = [
-    // --- MISTAKE ---
-    // The previous component design had no clear, integrated way for a user to start the
-    // hospital registration process, leading to a disconnected and buggy user experience.
-
-    // --- FIX: Step 2 ---
-    // A new, special "role" is added to the list. This isn't a real user role for the
-    // smart contract but a UI trigger. When selected, it will display the hospital
-    // registration form instead of the standard user form, unifying the two flows.
-    { id: 'register_hospital', name: 'Register Hospital', description: 'Become a Hospital Administrator for your organization.', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4', isProfessional: false },
-    { id: 0, name: 'Patient', description: 'The owner of the medical records.', icon: 'M12 12a5 5 0 110-10 5 5 0 010 10zm0-2a3 3 0 100-6 3 3 0 000 6z', isProfessional: false },
-    { id: 1, name: 'Doctor', description: 'A verified healthcare professional.', icon: 'M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 10V9a2 2 0 00-2-2h-3m-4 0V4a2 2 0 012-2h4a2 2 0 012 2v2', isProfessional: true },
-    { id: 7, name: 'Lab Technician', description: 'Uploads verified lab test results.', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4', isProfessional: true },
-    // { id: 3, name: 'Insurance Provider', description: 'An entity that can request access for claims.', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', isProfessional: true },
-    // { id: 4, name: 'Pharmacist', description: 'Dispenses medications and prescriptions.', icon: 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z', isProfessional: true },
-    // { id: 5, name: 'Researcher', description: 'Accesses anonymized data for studies.', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z', isProfessional: true },
-    // { id: 6, name: 'Guardian', description: 'A legal representative for a patient.', icon: 'M12 15l-4 4m0 0l-4-4m4 4V3', isProfessional: false },
+    { id: 'register_hospital', name: 'Register Hospital', description: 'Become a Hospital Administrator for your organization.', icon: Building, isProfessional: false },
+    { id: 0, name: 'Patient', description: 'The owner of the medical records.', icon: User, isProfessional: false },
+    { id: 1, name: 'Doctor', description: 'A verified healthcare professional.', icon: Stethoscope, isProfessional: true },
+    { id: 7, name: 'Lab Technician', description: 'Uploads verified lab test results.', icon: Beaker, isProfessional: true },
 ];
 
 const professionalRoles = roles.filter(r => r.isProfessional).map(r => r.id);
 
-export default function RegistrationForm() {
-    // [MODIFIED] Removed 'contract' and added 'api'
-    const { account, checkUserRegistration, userStatus, api } = useWeb3();
-    const [name, setName] = useState('');
-    const [selectedRole, setSelectedRole] = useState(null);
-    const [isLoading, setIsLoading] = useState(false);
+const Stepper = ({ currentStep }) => {
+    const steps = ['Select Role', 'Your Details', 'Confirm & Register'];
+    return (
+        // --- MODIFICATION: Reduced margin bottom ---
+        <nav className="flex items-center justify-center mb-8" aria-label="Progress">
+            <ol className="flex items-center space-x-2 sm:space-x-4">
+                {steps.map((name, index) => {
+                    const stepNumber = index + 1;
+                    const isCompleted = stepNumber < currentStep;
+                    const isCurrent = stepNumber === currentStep;
 
-    const [hospitals, setHospitals] = useState([]);
+                    return (
+                        <li key={name} className={`flex items-center ${stepNumber < steps.length ? 'flex-1' : ''}`}>
+                            <div className="flex flex-col items-center">
+                                <div className={`flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-full transition-colors ${
+                                    isCompleted ? 'bg-blue-600 text-white' : 
+                                    isCurrent ? 'bg-blue-100 text-blue-600 border-2 border-blue-600' : 
+                                    'bg-gray-100 text-gray-400 border-2 border-gray-200'
+                                }`}>
+                                    {isCompleted ? (
+                                        <Check className="w-5 h-5 sm:w-6 sm:h-6" />
+                                    ) : (
+                                        <span className="font-semibold">{stepNumber}</span>
+                                    )}
+                                </div>
+                                <span className={`mt-2 text-xs sm:text-sm font-medium text-center ${
+                                    isCurrent ? 'text-blue-600' : 'text-gray-500'
+                                }`}>{name}</span>
+                            </div>
+                            {stepNumber < steps.length && (
+                                <ChevronRight className="w-5 h-5 text-gray-300 mx-2 sm:mx-4" />
+                            )}
+                        </li>
+                    );
+                })}
+            </ol>
+        </nav>
+    );
+};
+
+export default function RegistrationForm() {
+    // --- MERGE: Added refetchUserProfile ---
+    const { account, checkUserRegistration, userStatus, api, refetchUserProfile } = useWeb3();
+    
+    const [step, setStep] = useState(1); 
+    
+    // State for User/Professional Registration
+    const [name, setName] = useState('');
     const [selectedHospital, setSelectedHospital] = useState('');
     const [hospitalSearch, setHospitalSearch] = useState('');
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const hospitalDropdownRef = useRef(null);
 
-    const scrollContainerRef = useRef(null);
-    const [showLeftArrow, setShowLeftArrow] = useState(false);
-    const [showRightArrow, setShowRightArrow] = useState(true);
+    // --- MERGE: State for Hospital Registration ---
+    const [hospitalName, setHospitalName] = useState('');
 
-    // --- 2. ADD MODAL STATE ---
+    // Shared State
+    const [selectedRole, setSelectedRole] = useState(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [hospitals, setHospitals] = useState([]);
     const [modalState, setModalState] = useState({
         isOpen: false,
         title: '',
@@ -58,21 +97,20 @@ export default function RegistrationForm() {
         confirmColor: 'bg-indigo-600',
     });
 
-    // Function to close the modal
+    // --- SHARED MODAL LOGIC ---
     const closeModal = () => {
         if (isLoading) return;
         setModalState({ ...modalState, isOpen: false });
     };
 
-    // Function to open the modal for registration confirmation
-    const openConfirm = () => {
-        // Perform initial validation *before* showing the modal
+    // --- LOGIC FOR USER/PROFESSIONAL REGISTRATION ---
+    const openUserConfirm = () => {
         if (!account) { toast.error('Please connect your wallet first.'); return; }
         if (!name) { toast.error('Please enter your full name.'); return; }
         if (selectedRole === null) { toast.error('Please select a role.'); return; }
 
         const roleObject = roles.find(r => r.id === selectedRole);
-        if (!roleObject) { toast.error('Invalid role selected.'); return; } // Should not happen
+        if (!roleObject) { toast.error('Invalid role selected.'); return; }
 
         const isProfessional = professionalRoles.includes(selectedRole);
         if (isProfessional && selectedHospital === '') {
@@ -80,27 +118,48 @@ export default function RegistrationForm() {
             return;
         }
 
-        const hospitalName = isProfessional ? hospitals.find(h => h.hospitalId === selectedHospital)?.name : null;
+        const selectedHospitalName = isProfessional ? hospitals.find(h => h.hospitalId === selectedHospital)?.name : null;
         const confirmMessage = isProfessional
-            ? `Are you sure you want to register as a ${roleObject.name} and request affiliation with ${hospitalName}?`
+            ? `Are you sure you want to register as a ${roleObject.name} and request affiliation with ${selectedHospitalName}?`
             : `Are you sure you want to register as a ${roleObject.name}?`;
 
         setModalState({
             isOpen: true,
             title: 'Confirm Registration',
             message: confirmMessage,
-            onConfirm: confirmSubmit, // Point to the function with the actual logic
+            onConfirm: confirmUserSubmit, // Renamed function
             confirmText: 'Register',
-            confirmColor: 'bg-teal-600'
+            confirmColor: 'bg-blue-600' 
         });
     };
-    // --- END OF MODAL STATE ---
+    
+    // --- MERGE: LOGIC FOR HOSPITAL REGISTRATION ---
+    const openHospitalConfirm = () => {
+        if (!api) {
+            toast.error("Please connect your wallet first.");
+            return;
+        }
+        if (!hospitalName) {
+            toast.error("Please enter a hospital name.");
+            return;
+        }
 
+        setModalState({
+            isOpen: true,
+            title: 'Confirm Hospital Registration Request',
+            message: `Are you sure you want to submit a registration request for "${hospitalName}"? Your current wallet address will be proposed as the administrator.`,
+            onConfirm: confirmHospitalSubmit, // New function
+            confirmText: 'Submit Request',
+            confirmColor: 'bg-blue-600'
+        });
+    };
 
+    
     if (userStatus === 'pending_hospital' || userStatus === 'rejected') {
         return <HospitalRequestPending />;
     }
 
+    // Fetch existing hospitals (for professionals to select)
     useEffect(() => {
         const fetchHospitals = async () => {
             try {
@@ -116,6 +175,7 @@ export default function RegistrationForm() {
         fetchHospitals();
     }, []);
 
+    // Dropdown click outside logic
     useEffect(() => {
         const handleClickOutside = (event) => {
             if (hospitalDropdownRef.current && !hospitalDropdownRef.current.contains(event.target)) {
@@ -126,60 +186,24 @@ export default function RegistrationForm() {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
-    const handleScroll = () => {
-        if (scrollContainerRef.current) {
-            const { scrollLeft, scrollWidth, clientWidth } = scrollContainerRef.current;
-            setShowLeftArrow(scrollLeft > 5);
-            setShowRightArrow(scrollLeft < scrollWidth - clientWidth - 5);
-        }
-    };
-
-    useEffect(() => {
-        const container = scrollContainerRef.current;
-        if (container) {
-            container.addEventListener('scroll', handleScroll);
-            window.addEventListener('resize', handleScroll);
-            handleScroll();
-            return () => {
-                if (container) container.removeEventListener('scroll', handleScroll);
-                window.removeEventListener('resize', handleScroll);
-            }
-        }
-    }, []);
-
-    const scroll = (direction) => {
-        if (scrollContainerRef.current) {
-            const scrollAmount = scrollContainerRef.current.clientWidth * 0.8;
-            scrollContainerRef.current.scrollBy({
-                left: direction === 'left' ? -scrollAmount : scrollAmount,
-                behavior: 'smooth'
-            });
-        }
-    };
-
-    // --- 3. RENAMED ORIGINAL FUNCTION & MOVED LOGIC ---
-    const confirmSubmit = async () => {
-        // Validation already done in openConfirm
-
+    // --- USER/PROFESSIONAL SUBMIT LOGIC ---
+    const confirmUserSubmit = async () => {
         setIsLoading(true);
         const toastId = toast.loading('Processing registration...');
+        
+        setStep(3); // Move to final step (visual)
 
         try {
             const isProfessional = professionalRoles.includes(selectedRole);
 
             if (isProfessional) {
                 toast.loading('Step 1/2: Creating on-chain identity...', { id: toastId });
-                // [MODIFIED] Check for api service
                 if (!api) { throw new Error('API service not initialized.'); }
                 
-                // [MODIFIED] Call sponsored backend endpoint instead of direct contract call
                 await api.registerUser(name, selectedRole, selectedHospital);
-                // [REMOVED] const onChainTx = await contract.registerUser(name, selectedRole);
-                // [REMOVED] await onChainTx.wait();
                 
                 toast.success('On-chain identity created!', { id: toastId });
 
-                // [UNCHANGED] This off-chain fetch logic remains the same
                 toast.loading('Step 2/2: Submitting affiliation request...', { id: toastId });
                 const roleObject = roles.find(r => r.id === selectedRole);
                 if (!roleObject) {
@@ -206,17 +230,12 @@ export default function RegistrationForm() {
 
             } else { // Patient Registration
                 toast.loading('Step 1/2: Creating on-chain identity...', { id: toastId });
-                // [MODIFIED] Check for api service
                 if (!api) { throw new Error('API service not initialized.'); }
 
-                // [MODIFIED] Call sponsored backend endpoint. Pass 0 for hospitalId for patients.
                 await api.registerUser(name, selectedRole, 0);
-                // [REMOVED] const tx = await contract.registerUser(name, selectedRole);
-                // [REMOVED] await tx.wait();
 
                 toast.success('On-chain identity created!', { id: toastId });
 
-                // [UNCHANGED] This off-chain fetch logic remains the same
                 toast.loading('Step 2/2: Setting up your account...', { id: toastId });
                 const response = await fetch('http://localhost:3001/api/users/register-patient', {
                     method: 'POST',
@@ -234,105 +253,268 @@ export default function RegistrationForm() {
                 toast.success('Account setup complete! Redirecting...', { id: toastId });
             }
 
-            await checkUserRegistration(); // Refetch user status after successful registration
+            await checkUserRegistration(); // Refetch user status (for users)
 
         } catch (error) {
             console.error("Registration failed:", error);
-            // [MODIFIED] Use error.message which will now come from the apiFetch helper
             toast.error(error.message || "Registration failed.", { id: toastId });
+            setStep(2); // On error, send back to Step 2
         } finally {
             setIsLoading(false);
-            closeModal(); // Close modal on completion or error
+            closeModal();
         }
     };
 
-    // --- 4. MODIFY FORM SUBMISSION HANDLER ---
+    // --- MERGE: HOSPITAL SUBMIT LOGIC ---
+    const confirmHospitalSubmit = async () => {
+        setIsLoading(true);
+        const toastId = toast.loading("Submitting hospital registration request...");
+
+        setStep(3); // Move to final step (visual)
+
+        try {
+            await api.requestRegistration(hospitalName);
+
+            toast.success("Request submitted successfully! A Super Admin will review it shortly.", { id: toastId, duration: 5000 });
+            setHospitalName(''); // Clear form on success
+
+            // --- THIS IS THE FIX ---
+            // The line `await checkUserRegistration()` has been removed.
+            // The optimistic update in `Web3Context.js` will now correctly
+            // set the state to 'pending_hospital' without being overwritten.
+            // --- END OF FIX ---
+
+        } catch (error) {
+            console.error("Hospital registration request failed:", error);
+            toast.error(error.message || "An error occurred.", { id: toastId });
+            setStep(2); // On error, send back to Step 2
+        } finally {
+            setIsLoading(false);
+            closeModal();
+        }
+    };
+
+    // This handler is only for the User/Professional form
     const handleSubmit = (e) => {
         e.preventDefault();
-        openConfirm(); // Open the confirmation modal instead of running logic directly
+        openUserConfirm();
+    };
+
+    // This handler is only for the Hospital form
+    const handleHospitalSubmit = (e) => {
+        e.preventDefault();
+        openHospitalConfirm();
+    };
+
+
+    const handleRoleSelect = (roleId) => {
+        setSelectedRole(roleId);
+        setStep(2);
     };
 
     const isProfessionalRoleSelected = selectedRole !== null && professionalRoles.includes(selectedRole);
     const filteredHospitals = hospitals.filter(h => h.name.toLowerCase().includes(hospitalSearch.toLowerCase()));
 
+    const containerVariants = {
+        hidden: { opacity: 0 },
+        visible: {
+            opacity: 1,
+            transition: {
+                staggerChildren: 0.1,
+            },
+        },
+    };
+
+    const itemVariants = {
+        hidden: { opacity: 0, y: 20 },
+        visible: { opacity: 1, y: 0 },
+    };
+
     return (
-        <div className="w-full max-w-2xl p-8 space-y-6 bg-white rounded-2xl shadow-xl border border-slate-200">
-            <h2 className="text-3xl font-bold text-center text-slate-900">Create Your Account</h2>
-            <p className="text-center text-slate-500">First, choose your primary role or action in the ecosystem.</p>
+        <div className="w-full max-w-5xl mx-auto py-8 px-4">
+            <Stepper currentStep={step} />
 
-            <div className="relative">
-                {showLeftArrow && (
-                    <button onClick={() => scroll('left')} className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 z-10 bg-slate-800/60 backdrop-blur-sm rounded-full p-2 shadow-lg hover:bg-slate-800/80 transition-all">
-                        <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg>
-                    </button>
+            <AnimatePresence mode="wait">
+                
+                {step === 1 && (
+                    <motion.div
+                        key="step1"
+                        initial={{ opacity: 0, x: -50 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: 50 }}
+                        transition={{ duration: 0.3, ease: "easeInOut" }}
+                    >
+                        <h2 className="text-3xl font-bold text-center text-gray-900 mb-4">Step 1: Select Your Role</h2>
+                        <p className="text-lg text-center text-gray-600 mb-8">Choose your primary role or action in the ecosystem.</p>
+                        
+                        <motion.div 
+                            className="grid grid-cols-1 md:grid-cols-2 gap-6"
+                            variants={containerVariants}
+                            initial="hidden"
+                            animate="visible"
+                        >
+                            {roles.map((role) => {
+                                const Icon = role.icon;
+                                return (
+                                    <motion.button
+                                        key={role.id}
+                                        type="button"
+                                        onClick={() => handleRoleSelect(role.id)}
+                                        className={`flex flex-col items-center text-center p-6 bg-white rounded-2xl shadow-lg border-2 transition-all duration-200 hover:shadow-xl hover:-translate-y-1 ${
+                                            selectedRole === role.id ? 'border-blue-600 ring-4 ring-blue-100' : 'border-gray-100 hover:border-gray-200'
+                                        }`}
+                                        variants={itemVariants}
+                                    >
+                                        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-100 text-blue-600 mb-3">
+                                            <Icon className="h-7 w-7" />
+                                        </div>
+                                        <h3 className="text-2xl font-semibold text-gray-900">{role.name}</h3>
+                                        <p className="mt-2 text-base text-gray-600">{role.description}</p>
+                                    </motion.button>
+                                );
+                            })}
+                        </motion.div>
+                    </motion.div>
                 )}
-                <div ref={scrollContainerRef} className="flex gap-4 overflow-x-auto p-4" style={{ scrollbarWidth: 'none', 'msOverflowStyle': 'none' }}>
-                    {roles.map((role) => (
-                        <button key={role.id} type="button" onClick={() => setSelectedRole(role.id)}
-                            className={`flex-shrink-0 w-44 p-4 border rounded-lg text-center transition-all duration-200 shadow-md hover:shadow-lg hover:-translate-y-1 ${selectedRole === role.id ? 'border-teal-500 bg-teal-50 ring-2 ring-teal-500' : 'border-slate-300 bg-slate-50'}`}>
-                            <svg className={`w-8 h-8 mx-auto mb-2 ${selectedRole === role.id ? 'text-teal-600' : 'text-slate-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={role.icon}></path></svg>
-                            <h3 className="font-semibold text-slate-800">{role.name}</h3>
-                            <p className="text-xs text-slate-500 h-10">{role.description}</p>
-                        </button>
-                    ))}
-                </div>
-                {showRightArrow && (
-                    <button onClick={() => scroll('right')} className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 z-10 bg-slate-800/60 backdrop-blur-sm rounded-full p-2 shadow-lg hover:bg-slate-800/80 transition-all">
-                        <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
-                    </button>
-                )}
-            </div>
 
-            {/* --- FIX: Step 3 --- */}
-            {selectedRole === 'register_hospital' ? (
-                <div className="pt-4">
-                    {/* --- 5. PASS CONFIRMATION MODAL LOGIC TO CHILD --- */}
-                    {/* HospitalRegistrationForm will now also need modal logic */}
-                    <HospitalRegistrationForm />
-                </div>
-            ) : (
-                // --- 6. POINT FORM ONSUBMIT TO THE NEW HANDLER ---
-                <form onSubmit={handleSubmit} className="space-y-6 pt-4">
-                    <div className="relative">
-                        <svg className="w-6 h-6 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
-                        <input id="name" type="text" value={name} onChange={(e) => setName(e.target.value)}
-                            className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500"
-                            placeholder="Enter your full name" required disabled={isLoading}/>
-                    </div>
-
-                    {isProfessionalRoleSelected && (
-                        <div className="relative" ref={hospitalDropdownRef}>
-                            <svg className="w-6 h-6 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 z-10" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
-                            <input type="text" value={hospitalSearch}
-                                onChange={(e) => { setHospitalSearch(e.target.value); setSelectedHospital(''); setIsDropdownOpen(true); }}
-                                onFocus={() => setIsDropdownOpen(true)}
-                                placeholder="Search and select your hospital"
-                                className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500 bg-white"
-                                disabled={isLoading} />
-                            {isDropdownOpen && (
-                                <div className="absolute z-20 w-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                                    {filteredHospitals.length > 0 ? (
-                                        filteredHospitals.map((hospital) => (
-                                            <button key={hospital._id} type="button" className="w-full text-left px-4 py-2 hover:bg-teal-50"
-                                                onClick={() => { setHospitalSearch(hospital.name); setSelectedHospital(hospital.hospitalId); setIsDropdownOpen(false); }}>
-                                                {hospital.name}
-                                            </button>
-                                        ))
-                                    ) : ( <p className="px-4 py-2 text-slate-500">No hospitals found.</p> )}
-                                </div>
-                            )}
+                {step === 2 && (
+                    <motion.div
+                        key="step2"
+                        initial={{ opacity: 0, x: 50 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -50 }}
+                        transition={{ duration: 0.3, ease: "easeInOut" }}
+                    >
+                        <div className="flex items-center mb-6">
+                            <button 
+                                onClick={() => setStep(1)} 
+                                className="flex items-center text-sm font-medium text-gray-600 hover:text-gray-900"
+                            >
+                                <ArrowLeft className="w-4 h-4 mr-2" />
+                                Back to Role Selection
+                            </button>
                         </div>
-                    )}
 
-                    <div>
-                        <button type="submit" disabled={isLoading || selectedRole === null} className="w-full px-4 py-3 font-bold text-white bg-teal-600 rounded-lg hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:bg-slate-400 transition-colors shadow-lg hover:shadow-xl">
-                            {isLoading ? 'Processing...' : (isProfessionalRoleSelected ? 'Confirm & Request Affiliation' : 'Confirm & Create Identity')}
-                        </button>
-                    </div>
-                </form>
-            )}
+                        <h2 className="text-3xl font-bold text-center text-gray-900 mb-4">Step 2: Your Details</h2>
+                        <p className="text-lg text-center text-gray-600 mb-8">Please provide the required information for your chosen role.</p>
 
-            {/* --- 7. RENDER THE MODAL --- */}
+                        {/* --- MERGE: TERNARY LOGIC --- */}
+                        {selectedRole === 'register_hospital' ? (
+                            // --- MERGE: HOSPITAL FORM MARKUP ---
+                            <form onSubmit={handleHospitalSubmit} className="space-y-4 pt-4 max-w-lg mx-auto">
+                                <motion.div
+                                    className="relative"
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ duration: 0.5, delay: 0.1 }}
+                                >
+                                    <label htmlFor="hospitalName" className="block text-sm font-medium text-gray-700 mb-1">
+                                        Hospital Name
+                                    </label>
+                                    <div className="relative">
+                                        <Building className="w-5 h-5 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                                        <input
+                                            id="hospitalName"
+                                            type="text"
+                                            value={hospitalName}
+                                            onChange={(e) => setHospitalName(e.target.value)}
+                                            placeholder="e.g., City General Hospital"
+                                            className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                                            required
+                                            disabled={isLoading}
+                                        />
+                                    </div>
+                                </motion.div>
+                                
+                                <p className="text-xs text-center text-gray-500 pt-2">
+                                    Your current wallet address will be proposed as the Hospital Administrator.
+                                </p>
+
+                                <motion.div
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ duration: 0.5, delay: 0.2 }}
+                                >
+                                    <button type="submit" disabled={isLoading} className={`w-full flex justify-center items-center px-4 py-3 font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 transition-colors shadow-lg hover:shadow-xl`}>
+                                        {isLoading ? (
+                                            <Loader2 className="w-6 h-6 animate-spin" />
+                                        ) : (
+                                            'Confirm & Request Registration'
+                                        )}
+                                    </button>
+                                </motion.div>
+                            </form>
+                        ) : (
+                            // --- EXISTING USER/PROFESSIONAL FORM ---
+                            <form onSubmit={handleSubmit} className="space-y-4 pt-4 max-w-lg mx-auto">
+                                <motion.div 
+                                    className="relative"
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ duration: 0.5, delay: 0.1 }}
+                                >
+                                    <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                                    <div className="relative">
+                                        <User className="w-5 h-5 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                                        <input id="name" type="text" value={name} onChange={(e) => setName(e.target.value)}
+                                            className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                                            placeholder="Enter your full name" required disabled={isLoading}/>
+                                    </div>
+                                </motion.div>
+
+                                {isProfessionalRoleSelected && (
+                                    <motion.div 
+                                        className="relative" 
+                                        ref={hospitalDropdownRef}
+                                        initial={{ opacity: 0, y: 20 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ duration: 0.5, delay: 0.2 }}
+                                    >
+                                        <label htmlFor="hospital" className="block text-sm font-medium text-gray-700 mb-1">Affiliated Hospital</label>
+                                        <div className="relative">
+                                            <Building className="w-5 h-5 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2 z-10" />
+                                            <input type="text" id="hospital" value={hospitalSearch}
+                                                onChange={(e) => { setHospitalSearch(e.target.value); setSelectedHospital(''); setIsDropdownOpen(true); }}
+                                                onFocus={() => setIsDropdownOpen(true)}
+                                                placeholder="Search and select your hospital"
+                                                className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                                disabled={isLoading} />
+                                        </div>
+                                        {isDropdownOpen && (
+                                            <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                                                {filteredHospitals.length > 0 ? (
+                                                    filteredHospitals.map((hospital) => (
+                                                        <button key={hospital._id} type="button" className="w-full text-left px-4 py-2 hover:bg-blue-50"
+                                                            onClick={() => { setHospitalSearch(hospital.name); setSelectedHospital(hospital.hospitalId); setIsDropdownOpen(false); }}>
+                                                            {hospital.name}
+                                                        </button>
+                                                    ))
+                                                ) : ( <p className="px-4 py-2 text-gray-500">No hospitals found.</p> )}
+                                            </div>
+                                        )}
+                                    </motion.div>
+                                )}
+
+                                <motion.div
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ duration: 0.5, delay: 0.3 }}
+                                >
+                                    <button type="submit" disabled={isLoading || selectedRole === null} className={`w-full flex justify-center items-center px-4 py-3 font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 transition-colors shadow-lg hover:shadow-xl`}>
+                                        {isLoading ? (
+                                            <Loader2 className="w-6 h-6 animate-spin" />
+                                        ) : (
+                                            'Confirm & Register'
+                                        )}
+                                    </button>
+                                </motion.div>
+                            </form>
+                        )}
+                    </motion.div>
+                )}
+
+            </AnimatePresence>
+
             <ConfirmationModal
                 isOpen={modalState.isOpen}
                 onClose={closeModal}
@@ -341,8 +523,9 @@ export default function RegistrationForm() {
                 message={modalState.message}
                 confirmText={modalState.confirmText}
                 confirmColor={modalState.confirmColor}
-                isLoading={isLoading} // Tie loading to existing state
+                isLoading={isLoading}
             />
         </div>
     );
 }
+

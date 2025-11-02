@@ -385,9 +385,18 @@ export const Web3Provider = ({ children }) => {
             // [FIX] Add userAddress: account to the body
             return apiFetch('/api/users/sponsored/register-user', 'POST', { name, role, hospitalId, userAddress: account });
         },
-        requestRegistration: (hospitalName) => {
+        requestRegistration: async (hospitalName) => {
             // [FIX] Add userAddress: account to the body
-            return apiFetch('/api/users/sponsored/request-registration', 'POST', { hospitalName, userAddress: account });
+            const response = await apiFetch('/api/users/sponsored/request-registration', 'POST', { hospitalName, userAddress: account });
+            
+            // --- THIS IS THE FIX ---
+            // After the API call succeeds, we KNOW the user's status
+            // is 'pending_hospital'. We set it directly to bypass
+            // the database race condition.
+            setUserStatus('pending_hospital');
+            // --- END OF FIX ---
+
+            return response; // Return the response as normal
         },
         savePublicKey: (publicKey, signature) => {
             // [FIX] Add userAddress: account to the body
@@ -687,3 +696,4 @@ export const Web3Provider = ({ children }) => {
 export const useWeb3 = () => {
     return useContext(Web3Context);
 };
+

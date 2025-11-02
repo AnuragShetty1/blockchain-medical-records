@@ -8,11 +8,27 @@ import Notifications from './Notifications';
 const BellIcon = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" /></svg>;
 
 export default function Header() {
-    // --- MODIFICATION: The 'theme' state is now read from the context. ---
-    // --- FIX 1 of 2: Ask for 'disconnect' (which the context provides) ---
-    const { account, connectWallet, disconnect, userProfile, notifications, theme } = useWeb3();
+    // Kept all existing context hooks, including 'disconnect'
+    const { account, connectWallet, disconnect, userProfile, notifications } = useWeb3();
     const [showNotifications, setShowNotifications] = useState(false);
     const notificationRef = useRef(null);
+
+    // --- LOGIC FROM LANDINGHEADER.JS ---
+    // State to track if the user has scrolled
+    const [isScrolled, setIsScrolled] = useState(false);
+
+    // Add scroll event listener to update the header style
+    useEffect(() => {
+        const handleScroll = () => {
+            // Set state to true if scrolled more than 10px, else false
+            setIsScrolled(window.scrollY > 10);
+        };
+        window.addEventListener('scroll', handleScroll);
+        return () => {
+            window.removeEventListener('scroll', handleScroll);
+        };
+    }, []);
+    // --- END OF LOGIC FROM LANDINGHEADER.JS ---
 
     const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -34,46 +50,45 @@ export default function Header() {
 
     const isPatient = userProfile && Number(userProfile.role) === 0;
 
-    // --- MODIFICATION: Conditional styles are defined here. ---
-    const isDarkTheme = theme === 'dark';
+    // --- MODIFICATION: REMOVED ALL THEME LOGIC ---
+    // All `isDarkTheme` variables and ternaries have been removed.
 
-    const headerClasses = isDarkTheme
-        ? "bg-slate-900 backdrop-blur-sm border-b border-slate-700 sticky top-0 z-50"
-        : "bg-white shadow-md sticky top-0 z-50";
-    
-    const navContainer = isDarkTheme
-        ? "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex justify-between items-center min-w-screen"
-        : "container mx-auto px-6 py-3 flex justify-between items-center";
-
-    const titleClasses = isDarkTheme
-        ? "text-2xl font-bold text-cyan-400 tracking-wider"
-        : "text-3xl font-bold text-teal-500";
-
-    const logoSize = isDarkTheme ? 50 : 50;
+    // --- DYNAMIC STYLING FROM LANDINGHEADER.JS ---
+    const baseHeaderClasses = "sticky top-0 z-50 transition-all duration-300 ease-in-out";
+    const scrolledHeaderClasses = "bg-white/75 backdrop-blur-sm border-b border-gray-900/10 shadow-sm";
+    // We start with the scrolled classes for a consistent logged-in look
+    const topHeaderClasses = "bg-white/75 backdrop-blur-sm border-b border-gray-900/10 shadow-sm";
 
     return (
-        <header className={headerClasses}>
-            <nav className={navContainer}>
+        // Apply dynamic classes
+        <header
+            className={`${baseHeaderClasses} ${
+                isScrolled ? scrolledHeaderClasses : topHeaderClasses
+            }`}
+        >
+            {/* Standardized nav container from LandingHeader.js */}
+            <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-3 flex justify-between items-center">
                 <div className="flex items-center space-x-3">
                     <Image className='rounded-lg'
                         src="/logo.png"
                         alt="PRISM Logo"
-                        width={logoSize}
-                        height={logoSize}
+                        width={40} // Standardized logo size
+                        height={40} // Standardized logo size
                         priority
                     />
-                    <span className={titleClasses}>
-                        {isDarkTheme ? "PRISM | Command Center" : "PRISM"}
+                    {/* Standardized gradient text from LandingHeader.js */}
+                    <span className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-purple-600">
+                        PRISM
                     </span>
                 </div>
 
                 <div className="flex items-center space-x-4">
-                    {/* The user profile and notification icons are hidden for the dark theme to keep it clean */}
-                    {userProfile && !isDarkTheme && (
+                    {userProfile && (
                         <>
                             {isPatient && (
                                 <div className="flex items-center gap-3">
-                                    <span className="text-slate-600 font-semibold hidden sm:block">
+                                    {/* Styled text to match new premium theme */}
+                                    <span className="text-gray-700 font-semibold hidden sm:block">
                                         {userProfile.name}
                                     </span>
                                     <Image
@@ -81,7 +96,7 @@ export default function Header() {
                                         alt="Profile Picture"
                                         width={40}
                                         height={40}
-                                        className="rounded-full object-cover border-2 border-slate-200"
+                                        className="rounded-full object-cover border-2 border-gray-200"
                                         onError={(e) => { e.target.onerror = null; e.target.src = '/default-avatar.svg'; }}
                                     />
                                 </div>
@@ -89,7 +104,7 @@ export default function Header() {
                             <div className="relative" ref={notificationRef}>
                                 <button
                                     onClick={() => setShowNotifications(prev => !prev)}
-                                    className="relative p-2 rounded-full hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition-colors"
+                                    className="relative p-2 rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-800 transition-colors"
                                     aria-label="Toggle Notifications"
                                 >
                                     <BellIcon />
@@ -108,19 +123,24 @@ export default function Header() {
                     )}
 
                     {account ? (
+                        // --- MODIFICATION: New premium button style ---
                         <button
-                            // --- FIX 2 of 2: Call the 'disconnect' function ---
                             onClick={disconnect}
-                            className={isDarkTheme 
-                                ? "bg-red-600/80 hover:bg-red-500 border border-red-500/50 text-white font-bold py-2 px-4 rounded-md transition-all hover:scale-105"
-                                : "bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-full transition-colors"}
+                            className="bg-red-600 text-white font-semibold py-2 px-5 rounded-lg shadow-md 
+                                     transform transition-all duration-300 ease-in-out
+                                     hover:scale-105 hover:bg-red-700 hover:shadow-lg
+                                     focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50"
                         >
                             Logout
                         </button>
                     ) : (
+                        // --- MODIFICATION: New premium button style ---
                         <button
                             onClick={connectWallet}
-                            className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded-full transition-colors"
+                            className="bg-blue-600 text-white font-semibold py-2 px-5 rounded-lg shadow-md 
+                                     transform transition-all duration-300 ease-in-out
+                                     hover:scale-105 hover:bg-blue-700 hover:shadow-lg
+                                     focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
                         >
                             Login / Register
                         </button>
