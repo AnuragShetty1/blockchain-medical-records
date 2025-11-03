@@ -6,14 +6,14 @@ import { useWeb3 } from '../context/Web3Context'; // Reverting to single parent 
 import toast from 'react-hot-toast';
 import { unwrapSymmetricKey } from '../utils/crypto'; // Reverting to single parent relative path
 import {
-    Eye, Loader2, FileText, AlertTriangle, User, ChevronLeft, Calendar,
+    Eye, Loader2,ShieldPlus , AlertTriangle, User, ChevronLeft, Calendar,
     // --- ADDED: DownloadCloud for Download action ---
     DownloadCloud
 } from 'lucide-react';
 import { fetchFromIPFS } from '../utils/ipfs'; // Reverting to single parent relative path
 import { motion, AnimatePresence } from 'framer-motion'; 
 // --- (NEW) IMPORTS ---
-import { TestTube, ClipboardList, Stethoscope, FileShield, FileQuestion } from 'lucide-react';
+import { TestTube, ClipboardList, Stethoscope, FileShield, Ribbon } from 'lucide-react';
 
 // --- (NEW) HELPERS ---
 const CATEGORIES_MAP = {
@@ -46,9 +46,9 @@ const getCategoryStyling = (category) => {
         case 'doctor-note':
             return { Icon: Stethoscope, color: "text-yellow-600", borderColor: "border-yellow-500" };
         case 'insurance-claim':
-            return { Icon: FileShield, color: "text-indigo-600", borderColor: "border-indigo-500" };
+            return { Icon: ShieldPlus, color: "text-indigo-600", borderColor: "border-indigo-500" };
         default:
-            return { Icon: FileQuestion, color: "text-gray-500", borderColor: "border-gray-400" };
+            return { Icon: Ribbon, color: "text-gray-500", borderColor: "border-gray-400" };
     }
 };
 
@@ -309,7 +309,7 @@ export default function DoctorRecordList({ records }) {
     if (!records || records.length === 0) {
         return (
             <div className="text-center p-8 text-gray-500 bg-gray-50 rounded-xl">
-                <FileText className="h-10 w-10 mx-auto text-gray-400" />
+                <ShieldPlus className="h-10 w-10 mx-auto text-gray-400" />
                 <h3 className="text-lg font-semibold text-gray-700 mt-2">No Records Found</h3>
                 <p className="mt-1">You have no shared records to review.</p>
             </div>

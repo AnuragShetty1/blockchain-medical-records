@@ -14,12 +14,12 @@ import ShareRecordsModal from '@/components/ShareRecordsModal';
 import { fetchFromIPFS } from '@/utils/ipfs';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    FileText,
+    ShieldPlus,
     TestTube,
     ClipboardList,
     Stethoscope,
     FileShield, // This icon seems to be causing the issue, but we'll leave the import
-    FileQuestion,
+    Ribbon,
     Download,
     Eye,
     Share2,
@@ -67,9 +67,9 @@ const getCategoryStyling = (category) => {
             // The 'FileShield' icon seems to be undefined at runtime.
             // We are replacing it with 'FileText' (which is confirmed to work)
             // to prevent the render crash, while keeping the category's color.
-            return { Icon: FileText, color: "text-indigo-600", borderColor: "border-indigo-500" };
+            return { Icon: ShieldPlus, color: "text-indigo-600", borderColor: "border-indigo-500" };
         default:
-            return { Icon: FileQuestion, color: "text-gray-500", borderColor: "border-gray-400" };
+            return { Icon: Ribbon, color: "text-gray-500", borderColor: "border-gray-400" };
     }
 };
 

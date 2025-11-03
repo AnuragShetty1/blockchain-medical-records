@@ -9,8 +9,8 @@ import axios from 'axios';
 import {
     Stethoscope, UploadCloud, FileSearch, HeartHandshake, Search, User,
     X as CloseIcon, ChevronDown, Info, Loader2,
-    TestTube, ClipboardList, FileShield, FileQuestion,
-    Beaker
+    TestTube, ClipboardList, ShieldPlus, Ribbon,
+    Beaker,FileText
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
@@ -92,8 +92,8 @@ const getCategoryIcon = (category) => {
             return TestTube;
         case 'prescription': return ClipboardList;
         case 'doctor-note': return Stethoscope;
-        case 'insurance-claim': return FileShield;
-        default: return FileQuestion;
+        case 'insurance-claim': return ShieldPlus;
+        default: return Ribbon;
     }
 };
 

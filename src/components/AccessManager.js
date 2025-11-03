@@ -225,7 +225,7 @@ export default function AccessManager({
                                                 </p>
                                                 <ul className="list-disc list-inside text-sm text-gray-600 max-h-24 overflow-y-auto">
                                                     {records.map((record, index) => (
-                                                        <li key={record.recordId || index} className="truncate" title={record.title}>
+                                                        <li key={record.recordId || `fallback-${index}`} className="truncate" title={record.title}>
                                                             {record.title || `Record ID: ${record.recordId}`}
                                                         </li>
                                                     ))}
