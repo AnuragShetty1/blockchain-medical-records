@@ -75,6 +75,8 @@ export default function PatientDashboard() {
             }
         } catch (error) {
             console.error("Failed to fetch professional access requests:", error);
+            // [MODIFIED] Add user-facing toast notification on error
+            toast.error(error.response?.data?.message || "Could not load access requests.");
         }
     }, [account]);
 
@@ -548,4 +550,3 @@ const AccessTabContent = () => (
         </div>
     </div>
 );
-

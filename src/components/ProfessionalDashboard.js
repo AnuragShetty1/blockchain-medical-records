@@ -161,8 +161,8 @@ const TabNavigation = ({ activeTab, onTabChange, config }) => {
                             key={tab.id}
                             onClick={() => onTabChange(tab.id)}
                             className={`relative flex-1 flex justify-center items-center gap-2 px-4 py-3 text-sm font-semibold rounded-lg transition-colors ${activeTab === tab.id
-                                ? activeTextColor
-                                : inactiveTextColor
+                                    ? activeTextColor
+                                    : inactiveTextColor
                                 }`}
                         >
                             <Icon className="h-5 w-5" />
@@ -221,7 +221,7 @@ const PatientSearchColumn = ({ onPatientSelect }) => {
                     }
                 }
             } catch (error) {
-                toast.error("Search failed.");
+                toast.error(error.response?.data?.message || "Search failed.");
                 setSearchMessage("Error during search.");
             } finally {
                 setIsSearching(false);
@@ -375,7 +375,7 @@ const RequestAccessSection = ({ config }) => {
                 const response = await axios.get(`http://localhost:3001/api/users/records/patient/${patientProfile.address}`);
                 setPatientRecords(response.data.data);
             } catch (error) {
-                toast.error("Could not fetch patient's records.");
+                toast.error(error.response?.data?.message || "Could not fetch patient's records.");
             } finally {
                 setIsLoadingRecords(false);
             }
@@ -517,11 +517,11 @@ const RequestAccessSection = ({ config }) => {
                                                 <label
                                                     key={record.recordId}
                                                     className={`flex items-center p-3.5 rounded-lg border cursor-pointer transition-colors
-                                                     ${isSelected
+                                                 ${isSelected
                                                             ? `${selectedAccentClass} ${borderAccentClass}`
                                                             : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
                                                         }
-                                                     `}
+                                                  `}
                                                 >
                                                     <input
                                                         type="checkbox"
@@ -604,6 +604,8 @@ const ReviewSection = () => {
             }
         } catch (error) {
             console.error("Error fetching shared records:", error);
+            // [MODIFIED] Add user-facing toast notification
+            toast.error(error.response?.data?.message || "Could not fetch shared records.");
             setPatientGroups([]);
         } finally {
             setIsLoading(false);

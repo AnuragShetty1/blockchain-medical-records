@@ -83,7 +83,7 @@ export default function DoctorRecordList({ records }) {
     const [decryptingId, setDecryptingId] = useState(null);
     const [metadataCache, setMetadataCache] = useState({});
     const [filterCategory, setFilterCategory] = useState('all');
-    const [sortBy, setSortBy] = useState('date-desc');
+    const [sortBy, setSortBy] = useState('date-desc'); // NEW: Sort state
 
     // --- NEW STATE: Tracks which patient is currently selected (address) ---
     const [activePatient, setActivePatient] = useState(null);
@@ -152,6 +152,8 @@ export default function DoctorRecordList({ records }) {
                         setMetadataCache(prev => ({ ...prev, [record.recordId]: data || null }));
                     } catch (error) {
                         console.error("Failed to fetch metadata:", error);
+                        // [MODIFIED] Add user-facing toast notification
+                        toast.error(`Failed to load metadata for record: ${record.title || record.recordId}`);
                         setMetadataCache(prev => ({ ...prev, [record.recordId]: null }));
                     }
                 })
@@ -160,7 +162,7 @@ export default function DoctorRecordList({ records }) {
 
         fetchAllMetadata();
         // Run this effect when the list of records or cache status changes
-    }, [records]);
+    }, [records, metadataCache]); // [FIX]: Added metadataCache to dependencies
     // --- (END METADATA FETCHER) ---
 
 
@@ -188,6 +190,7 @@ export default function DoctorRecordList({ records }) {
         processedRecords.sort((a, b) => {
             const metaA = metadataCache[a.recordId];
             const metaB = metadataCache[b.recordId];
+            // [FIX]: Use record.createdAt (from MongoDB) instead of record.timestamp
             const dateA = new Date(a.createdAt || 0); 
             const dateB = new Date(b.createdAt || 0);
 
@@ -244,10 +247,28 @@ export default function DoctorRecordList({ records }) {
                 const a = document.createElement('a');
                 a.href = url;
                 // Generate a clean filename: replace non-alphanumeric/hyphen/dot characters with underscores
-                const cleanTitle = metadata.title.replace(/[^a-z0-9\-\.]/gi, '_');
-                // Attempt to get file extension from mimeType, fall back to .dat
-                const fileExtension = metadata.fileType?.split('/').pop() || 'dat'; 
-                a.download = `${cleanTitle}.${fileExtension}`;
+                // [FIX] Use metadata.fileName if available, fallback to title
+                const cleanFilename = metadata.fileName || metadata.title.replace(/[^a-z0-9\-\.]/gi, '_');
+                
+                // [FIX] Ensure file extension is present
+                const fileExtension = metadata.fileType?.split('/').pop();
+                let finalFilename = cleanFilename;
+                if (fileExtension && !cleanFilename.endsWith(`.${fileExtension}`)) {
+                    // Avoid adding extension if it's already there (e.g., from metadata.fileName)
+                    const baseName = cleanFilename.split('.').slice(0,-1).join('.');
+                    if (baseName.length > 0 && cleanFilename.endsWith(fileExtension)) {
+                         // Looks like it has an extension, trust it
+                         finalFilename = cleanFilename;
+                    } else if (!cleanFilename.includes('.')) {
+                        // No extension at all, add it
+                        finalFilename = `${cleanFilename}.${fileExtension}`;
+                    }
+                    // If it has a different extension, we trust the original filename
+                } else if (!cleanFilename.includes('.')) {
+                    finalFilename = `${cleanFilename}.dat`; // fallback
+                }
+
+                a.download = finalFilename;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
@@ -459,6 +480,7 @@ const DoctorRecordCard = ({ record, metadata, onView, onDownload, isDecrypting, 
                     <InfoRow
                         Icon={Calendar}
                         label="Shared On"
+                        // [FIX]: Use record.createdAt (from MongoDB) instead of record.timestamp
                         value={record.createdAt ? format(new Date(record.createdAt), "PP") : "Unknown"}
                     />
                     <div className="mt-2">
@@ -476,7 +498,8 @@ const DoctorRecordCard = ({ record, metadata, onView, onDownload, isDecrypting, 
                     disabled={isDecrypting || !metadata}
                     className="flex items-center gap-1.5 px-3 py-2 text-white bg-green-600 rounded-lg shadow-md hover:bg-green-700 transition-colors disabled:bg-gray-400"
                 >
-                    {isDecrypting && decryptingId === record.recordId ? <Loader2 className="h-5 w-5 animate-spin" /> : <DownloadCloud className="h-5 w-5" />}
+                    {/* [FIX] Use isDecrypting prop */}
+                    {isDecrypting ? <Loader2 className="h-5 w-5 animate-spin" /> : <DownloadCloud className="h-5 w-5" />}
                     <span>Download</span>
                 </button>
                 <button
@@ -484,7 +507,8 @@ const DoctorRecordCard = ({ record, metadata, onView, onDownload, isDecrypting, 
                     disabled={isDecrypting || !metadata}
                     className="flex items-center gap-1.5 px-3 py-2 text-white bg-blue-600 rounded-lg shadow-md hover:bg-blue-700 transition-colors disabled:bg-gray-400"
                 >
-                    {isDecrypting && decryptingId === record.recordId ? <Loader2 className="h-5 w-5 animate-spin" /> : <Eye className="h-5 w-5" />}
+                    {/* [FIX] Use isDecrypting prop */}
+                    {isDecrypting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Eye className="h-5 w-5" />}
                     <span>View</span>
                 </button>
             </div>
@@ -541,3 +565,4 @@ const DoctorRecordCardError = ({ record }) => (
         </div>
     </div>
 );
+
