@@ -66,9 +66,9 @@ const authenticate = (req, res, next) => {
 // All routes below are untouched and will continue to function as-is.
 
 /**
- * @route   GET /api/users/status/:address
- * @desc    Check the comprehensive status of a given wallet address.
- * @access  Public
+ * @route   GET /api/users/status/:address
+ * @desc    Check the comprehensive status of a given wallet address.
+ * @access  Public
  */
 router.get('/status/:address', async (req, res, next) => {
     try {
@@ -110,9 +110,9 @@ router.get('/status/:address', async (req, res, next) => {
 });
 
 /**
- * @route   POST /api/users/request-association
- * @desc    Allows a professional to request affiliation with a hospital.
- * @access  Private (Authenticated User)
+ * @route   POST /api/users/request-association
+ * @desc    Allows a professional to request affiliation with a hospital.
+ * @access  Private (Authenticated User)
  */
 router.post('/request-association', async (req, res, next) => {
     try {
@@ -164,9 +164,9 @@ router.post('/request-association', async (req, res, next) => {
 });
 
 /**
- * @route   POST /api/users/register-patient
- * @desc    Creates a database record for a newly registered patient.
- * @access  Private (Authenticated User)
+ * @route   POST /api/users/register-patient
+ * @desc    Creates a database record for a newly registered patient.
+ * @access  Private (Authenticated User)
  */
 router.post('/register-patient', async (req, res, next) => {
     try {
@@ -206,9 +206,9 @@ router.post('/register-patient', async (req, res, next) => {
 });
 
 /**
- * @route   POST /api/users/reset-hospital-request
- * @desc    Resets a rejected request for a hospital OR a professional to allow re-registration.
- * @access  Private (Authenticated User)
+ * @route   POST /api/users/reset-hospital-request
+ * @desc    Resets a rejected request for a hospital OR a professional to allow re-registration.
+ * @access  Private (Authenticated User)
  */
 router.post('/reset-hospital-request', async (req, res, next) => {
     try {
@@ -251,9 +251,9 @@ router.post('/reset-hospital-request', async (req, res, next) => {
 
 
 /**
- * @route   GET /api/users/records/patient/:address
- * @desc    Get all records for a specific patient, with optional search.
- * @access  Public (should be protected later)
+ * @route   GET /api/users/records/patient/:address
+ * @desc    Get all records for a specific patient, with optional search.
+ * @access  Public (should be protected later)
  */
 router.get('/records/patient/:address', async (req, res, next) => {
     try {
@@ -276,9 +276,9 @@ router.get('/records/patient/:address', async (req, res, next) => {
 });
 
 /**
- * @route   GET /api/users/search-patients
- * @desc    Search for patients by name or address (case-insensitive)
- * @access  Public (for now, should be protected for professionals later)
+ * @route   GET /api/users/search-patients
+ * @desc    Search for patients by name or address (case-insensitive)
+ * @access  Public (for now, should be protected for professionals later)
  */
 router.get('/search-patients', async (req, res, next) => {
     try {
@@ -314,9 +314,9 @@ router.get('/search-patients', async (req, res, next) => {
 
 
 /**
- * @route   GET /api/users/access-requests/patient/:address
- * @desc    Get all pending access requests for a patient.
- * @access  Private (Patient only)
+ * @route   GET /api/users/access-requests/patient/:address
+ * @desc    Get all pending access requests for a patient.
+ * @access  Private (Patient only)
  */
 router.get('/access-requests/patient/:address', async (req, res, next) => {
     try {
@@ -377,9 +377,9 @@ router.get('/access-requests/patient/:address', async (req, res, next) => {
 
 
 /**
- * @route   POST /api/users/access-requests/respond
- * @desc    Allow a patient to approve or reject an access request.
- * @access  Private (Patient only)
+ * @route   POST /api/users/access-requests/respond
+ * @desc    Allow a patient to approve or reject an access request.
+ * @access  Private (Patient only)
  */
 router.post('/access-requests/respond', async (req, res, next) => {
     try {
@@ -411,7 +411,7 @@ router.post('/access-requests/respond', async (req, res, next) => {
 
             // Verify that the grants provided match the records in the request
             const requestedRecordIds = new Set(request.recordIds.map(id => id.toString()));
-            const grantedRecordIds = new Set(grants.map(g => g.recordId.toString()));
+            const grantedRecordIds = new Set(grants.map(g => String(g.recordId)));
 
             if (requestedRecordIds.size !== grantedRecordIds.size ||
                 ![...requestedRecordIds].every(id => grantedRecordIds.has(id))) {
@@ -420,11 +420,11 @@ router.post('/access-requests/respond', async (req, res, next) => {
                 return res.status(400).json({ success: false, message: 'Granted records do not match requested records.' });
             }
 
-            // Map the grants array to the AccessGrant schema
+            // Map the grants array to the AccessGrant schema, ensuring data types and casing are correct
             const newGrants = grants.map(grant => ({
-                recordId: grant.recordId,
-                patientAddress: request.patientAddress,
-                professionalAddress: request.professionalAddress,
+                recordId: parseInt(grant.recordId, 10), // FIX: Ensure recordId is cast to strict Integer
+                patientAddress: request.patientAddress.toLowerCase(), // FIX: Ensure consistency
+                professionalAddress: request.professionalAddress.toLowerCase(), // FIX: Ensure consistency
                 rewrappedKey: grant.rewrappedKey,
                 expirationTimestamp: new Date(grant.expirationTimestamp),
             }));
@@ -436,8 +436,10 @@ router.post('/access-requests/respond', async (req, res, next) => {
             } catch (error) {
                 // Handle potential duplicate key errors if grants already exist
                 if (error.code === 11000) {
+                    logger.error(`[DB INSERT FAILED: UNIQUE KEY VIOLATION] for request ${requestId}. Conflict Details: ${JSON.stringify(error.keyValue)} | Error Message: ${error.message}`);
                     logger.warn(`Some access grants for request ${requestId} already existed.`);
                 } else {
+                    logger.error(`[DB INSERT FAILED: UNHANDLED ERROR] for request ${requestId}. Error: ${error.message}`, error);
                     throw error; // Re-throw other errors
                 }
             }
@@ -458,18 +460,21 @@ router.post('/access-requests/respond', async (req, res, next) => {
 });
 
 /**
- * @route   GET /api/users/records/professional/:address
- * @desc    Get all records a professional has been granted access to, grouped by patient.
- * @access  Private (Professional only)
+ * @route   GET /api/users/records/professional/:address
+ * @desc    Get all records a professional has been granted access to, grouped by patient.
+ * @access  Private (Professional only)
  */
 router.get('/records/professional/:address', async (req, res, next) => {
     try {
         const professionalAddress = req.params.address.toLowerCase();
-
+        
         const grants = await AccessGrant.find({ 
             professionalAddress: professionalAddress,
             expirationTimestamp: { $gt: new Date() } 
         });
+
+        logger.info(`[Professional Records] Found ${grants.length} active grants for professional ${professionalAddress}.`);
+
 
         if (!grants || grants.length === 0) {
             return res.json({ success: true, data: [] });
@@ -486,6 +491,7 @@ router.get('/records/professional/:address', async (req, res, next) => {
         
         const patientAddresses = Object.keys(grantsByPatient);
 
+        // Fetch all necessary patient profiles and records in parallel
         const [patients, allRecords] = await Promise.all([
              User.find({ address: { $in: patientAddresses } }).select('name address'),
              Record.find({ recordId: { $in: grants.map(g => g.recordId) } })
@@ -496,8 +502,9 @@ router.get('/records/professional/:address', async (req, res, next) => {
             return acc;
         }, {});
 
+        // FIX: Ensure the patientMap uses strictly lowercase addresses for consistent lookup
         const patientMap = patients.reduce((acc, patient) => {
-            acc[patient.address] = patient;
+            acc[patient.address.toLowerCase()] = patient;
             return acc;
         }, {});
 
@@ -511,9 +518,10 @@ router.get('/records/professional/:address', async (req, res, next) => {
                 })
                 .filter(Boolean); 
             
+            // FIX: Lookup in patientMap now uses the guaranteed lowercase address from 'address'
             return {
                 patient: {
-                    name: patientMap[address]?.name || 'Unknown Patient',
+                    name: patientMap[address]?.name || 'Unknown Patient', 
                     address: address
                 },
                 records: patientRecords
@@ -523,15 +531,15 @@ router.get('/records/professional/:address', async (req, res, next) => {
         res.json({ success: true, data: result });
 
     } catch (error) {
-        logger.error(`Error fetching records for professional ${req.params.address}:`, error);
+        logger.error(`Error fetching records for professional ${req.params.address}: ${error.message}`, error);
         next(error);
     }
 });
 
 /**
- * @route   GET /api/users/access-grants/patient/:address
- * @desc    Get all active access grants given by a patient, grouped by professional.
- * @access  Private (Patient only)
+ * @route   GET /api/users/access-grants/patient/:address
+ * @desc    Get all active access grants given by a patient, grouped by professional.
+ * @access  Private (Patient only)
  */
 router.get('/access-grants/patient/:address', async (req, res, next) => {
     try {
@@ -589,9 +597,9 @@ router.get('/access-grants/patient/:address', async (req, res, next) => {
 });
 
 /**
- * @route   GET /api/hospitals
- * @desc    Get a list of all verified hospitals.
- * @access  Public
+ * @route   GET /api/hospitals
+ * @desc    Get a list of all verified hospitals.
+ * @access  Public
  */
 router.get('/hospitals', async (req, res, next) => {
     try {
@@ -606,9 +614,9 @@ router.get('/hospitals', async (req, res, next) => {
 });
 
 /**
- * @route   GET /api/hospitals/:id/professionals
- * @desc    Get all verified professionals for a specific hospital.
- * @access  Public
+ * @route   GET /api/hospitals/:id/professionals
+ * @desc    Get all verified professionals for a specific hospital.
+ * @access  Public
  */
 router.get('/hospitals/:hospitalId/professionals', async (req, res, next) => {
     try {
@@ -627,9 +635,9 @@ router.get('/hospitals/:hospitalId/professionals', async (req, res, next) => {
 });
 
 /**
- * @route   POST /api/users/records/details
- * @desc    Get specific details for a list of records by their IDs.
- * @access  Private (Authenticated user)
+ * @route   POST /api/users/records/details
+ * @desc    Get specific details for a list of records by their IDs.
+ * @access  Private (Authenticated user)
  */
 router.post('/records/details', async (req, res, next) => {
     try {
@@ -673,9 +681,9 @@ const handleTransaction = (promise, res, next) => {
 };
 
 /**
- * @route   POST /api/users/sponsored/register-user
- * @desc    Sponsors the 'registerUser' transaction.
- * @access  Private (Authenticated User)
+ * @route   POST /api/users/sponsored/register-user
+ * @desc    Sponsors the 'registerUser' transaction.
+ * @access  Private (Authenticated User)
  */
 router.post('/sponsored/register-user', /*authenticate,*/ (req, res, next) => {
     // [FIX] Read 'userAddress' from req.body for testing, or from req.user if auth is on.
@@ -699,10 +707,10 @@ router.post('/sponsored/register-user', /*authenticate,*/ (req, res, next) => {
 });
 
 /**
- * @route   POST /api/users/sponsored/save-public-key
- * @desc    Sponsors the 'savePublicKey' transaction.
- * @access  Private (Authenticated User)
- * @body    { string publicKey, string signature, string userAddress }
+ * @route   POST /api/users/sponsored/save-public-key
+ * @desc    Sponsors the 'savePublicKey' transaction.
+ * @access  Private (Authenticated User)
+ * @body    { string publicKey, string signature, string userAddress }
  */
 router.post('/sponsored/save-public-key', /*authenticate,*/ (req, res, next) => {
     // [FIX] Read 'userAddress' from req.body for testing
@@ -742,9 +750,9 @@ router.post('/sponsored/save-public-key', /*authenticate,*/ (req, res, next) => 
 });
 
 /**
- * @route   POST /api/users/sponsored/update-profile
- * @desc    Sponsors the 'updateUserProfile' transaction.
- * @access  Private (Authenticated User)
+ * @route   POST /api/users/sponsored/update-profile
+ * @desc    Sponsors the 'updateUserProfile' transaction.
+ * @access  Private (Authenticated User)
  */
 router.post('/sponsored/update-profile', /*authenticate,*/ (req, res, next) => {
     // [FIX] Read 'userAddress' from req.body for testing
@@ -768,9 +776,9 @@ router.post('/sponsored/update-profile', /*authenticate,*/ (req, res, next) => {
 });
 
 /**
- * @route   POST /api/users/sponsored/request-registration
- * @desc    Sponsors the 'requestRegistration' (for a hospital) transaction.
- * @access  Private (Authenticated User)
+ * @route   POST /api/users/sponsored/request-registration
+ * @desc    Sponsors the 'requestRegistration' (for a hospital) transaction.
+ * @access  Private (Authenticated User)
  */
 // [FIX] Renamed route from '/request-hospital-registration' to '/request-registration'
 router.post('/sponsored/request-registration', /*authenticate,*/ (req, res, next) => {
@@ -793,9 +801,9 @@ router.post('/sponsored/request-registration', /*authenticate,*/ (req, res, next
 });
 
 /**
- * @route   POST /api/users/sponsored/grant-access
- * @desc    Sponsors the 'grantRecordAccess' transaction (for a single record).
- * @access  Private (Patient only)
+ * @route   POST /api/users/sponsored/grant-access
+ * @desc    Sponsors the 'grantRecordAccess' transaction (for a single record).
+ * @access  Private (Patient only)
  */
 router.post('/sponsored/grant-access', /*authenticate,*/ (req, res, next) => {
     const { professionalAddress, recordId, duration, encryptedDek, userAddress: bodyAddress } = req.body;
@@ -816,9 +824,9 @@ router.post('/sponsored/grant-access', /*authenticate,*/ (req, res, next) => {
 });
 
 /**
- * @route   POST /api/users/sponsored/grant-multiple-access
- * @desc    Sponsors the 'grantMultipleRecordAccess' transaction.
- * @access  Private (Patient only)
+ * @route   POST /api/users/sponsored/grant-multiple-access
+ * @desc    Sponsors the 'grantMultipleRecordAccess' transaction.
+ * @access  Private (Patient only)
  */
 router.post('/sponsored/grant-multiple-access', /*authenticate,*/ (req, res, next) => {
     const { professionalAddress, recordIds, duration, encryptedDeks, userAddress: bodyAddress } = req.body;
@@ -843,9 +851,9 @@ router.post('/sponsored/grant-multiple-access', /*authenticate,*/ (req, res, nex
 
 
 /**
- * @route   POST /api/users/sponsored/revoke-access
- * @desc    Sponsors the 'revokeMultipleRecordAccess' transaction.
- * @access  Private (Patient only)
+ * @route   POST /api/users/sponsored/revoke-access
+ * @desc    Sponsors the 'revokeMultipleRecordAccess' transaction.
+ * @access  Private (Patient only)
  */
 router.post('/sponsored/revoke-access', /*authenticate,*/ (req, res, next) => {
     // [FIX] Read 'userAddress' from req.body for testing
@@ -869,9 +877,9 @@ router.post('/sponsored/revoke-access', /*authenticate,*/ (req, res, next) => {
 });
 
 /**
- * @route   POST /api/users/sponsored/request-access-insurance
- * @desc    Sponsors an insurance provider's 'requestAccess' transaction.
- * @access  Private (InsuranceProvider only)
+ * @route   POST /api/users/sponsored/request-access-insurance
+ * @desc    Sponsors an insurance provider's 'requestAccess' transaction.
+ * @access  Private (InsuranceProvider only)
  */
 router.post('/sponsored/request-access-insurance', /*authenticate,*/ (req, res, next) => {
     // [FIX] Read 'userAddress' from req.body for testing
@@ -893,9 +901,9 @@ router.post('/sponsored/request-access-insurance', /*authenticate,*/ (req, res, 
 });
 
 /**
- * @route   POST /api/users/sponsored/approve-request-insurance
- * @desc    Sponsors a patient's 'approveRequest' transaction.
- * @access  Private (Patient only)
+ * @route   POST /api/users/sponsored/approve-request-insurance
+ * @desc    Sponsors a patient's 'approveRequest' transaction.
+ * @access  Private (Patient only)
  */
 router.post('/sponsored/approve-request-insurance', /*authenticate,*/ (req, res, next) => {
     // [FIX] Read 'userAddress' from req.body for testing
@@ -917,9 +925,9 @@ router.post('/sponsored/approve-request-insurance', /*authenticate,*/ (req, res,
 });
 
 /**
- * @route   POST /api/users/sponsored/request-access-professional
- * @desc    Sponsors a professional's 'requestRecordAccess' transaction.
- * @access  Private (Professional only)
+ * @route   POST /api/users/sponsored/request-access-professional
+ * @desc    Sponsors a professional's 'requestRecordAccess' transaction.
+ * @access  Private (Professional only)
  */
 // [FIX] Renamed route to match frontend `api`
 router.post('/sponsored/request-access', /*authenticate,*/ (req, res, next) => {
@@ -943,9 +951,9 @@ router.post('/sponsored/request-access', /*authenticate,*/ (req, res, next) => {
 });
 
 /**
- * @route   POST /api/users/sponsored/add-self-record
- * @desc    Sponsors a patient's 'addSelfUploadedRecord' transaction.
- * @access  Private (Patient only)
+ * @route   POST /api/users/sponsored/add-self-record
+ * @desc    Sponsors a patient's 'addSelfUploadedRecord' transaction.
+ * @access  Private (Patient only)
  */
 router.post('/sponsored/add-self-record', /*authenticate,*/ (req, res, next) => {
     // [FIX] Read 'userAddress' from req.body for testing
@@ -967,9 +975,9 @@ router.post('/sponsored/add-self-record', /*authenticate,*/ (req, res, next) => 
 });
 
 /**
- * @route   POST /api/users/sponsored/add-verified-record
- * @desc    Sponsors a professional's 'addVerifiedRecord' transaction.
- * @access  Private (Professional only)
+ * @route   POST /api/users/sponsored/add-verified-record
+ * @desc    Sponsors a professional's 'addVerifiedRecord' transaction.
+ * @access  Private (Professional only)
  */
 router.post('/sponsored/add-verified-record', /*authenticate,*/ (req, res, next) => {
     // [FIX] Read 'userAddress' from req.body for testing
@@ -991,9 +999,9 @@ router.post('/sponsored/add-verified-record', /*authenticate,*/ (req, res, next)
 });
 
 /**
- * @route   POST /api/users/sponsored/add-self-records-batch
- * @desc    Sponsors a patient's 'addSelfUploadedRecordsBatch' transaction.
- * @access  Private (Patient only)
+ * @route   POST /api/users/sponsored/add-self-records-batch
+ * @desc    Sponsors a patient's 'addSelfUploadedRecordsBatch' transaction.
+ * @access  Private (Patient only)
  */
 // [FIX] Renamed route to match frontend
 router.post('/sponsored/add-self-records-batch', /*authenticate,*/ (req, res, next) => {
@@ -1025,9 +1033,9 @@ router.post('/sponsored/add-self-records-batch', /*authenticate,*/ (req, res, ne
 });
 
 /**
- * @route   POST /api/users/sponsored/add-verified-records-batch
- * @desc    Sponsors a professional's 'addVerifiedRecordsBatch' transaction.
- * @access  Private (Professional only)
+ * @route   POST /api/users/sponsored/add-verified-records-batch
+ * @desc    Sponsors a professional's 'addVerifiedRecordsBatch' transaction.
+ * @access  Private (Professional only)
  */
 // [FIX] Renamed route to match frontend
 router.post('/sponsored/add-verified-records-batch', /*authenticate,*/ (req, res, next) => {
