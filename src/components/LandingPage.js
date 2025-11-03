@@ -91,7 +91,7 @@ function HeroSection() {
                 >
                     <button
                         onClick={connectWallet}
-                        className="rounded-md bg-blue-600 px-6 py-3 text-base font-semibold text-white shadow-lg transition-all hover:scale-105 hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                        className="rounded-md bg-blue-600 px-6 py-3 text-base font-semibold text-white shadow-lg transition-all hover:scale-105 hover:bg-blue-500  focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
                     >
                         Securely Connect Now
                     </button>
@@ -429,7 +429,7 @@ function CTASection() {
                             onClick={connectWallet}
                             animate={{ scale: [1, 1.05, 1] }}
                             transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
-                            className="rounded-md bg-white px-6 py-3 text-base font-semibold text-blue-600 shadow-lg transition-all hover:scale-110 hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                            className="rounded-md bg-white px-6 py-3 text-base font-semibold text-blue-600 shadow-lg transition-all hover:scale-110 hover:bg-gray-100  focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
                         >
                             Securely Connect & Get Started
                         </motion.button>

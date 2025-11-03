@@ -546,7 +546,7 @@ const DoctorRecordCardSkeleton = () => (
 
 // --- (UNMODIFIED) Error Card ---
 const DoctorRecordCardError = ({ record }) => (
-    <div className="flex flex-col justify-between bg-red-50 rounded-2xl shadow-xl border border-red-200 p-5 border-t-4 border-red-500">
+    <div className="flex flex-col justify-between bg-red-50 rounded-2xl shadow-xl border p-5 border-t-4 border-red-500">
         <div>
             <div className="flex items-center gap-3">
                 <AlertTriangle className="h-7 w-7 text-red-600 flex-shrink-0" />
